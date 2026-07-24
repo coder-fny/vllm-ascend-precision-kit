@@ -1,0 +1,44 @@
+# DeepSeek-V2-Lite (27 layers, MLA + MoE, ~16B) — second verification model.
+# Different architecture from Qwen3 (MLA attention) to validate per-arch HookSpec.
+# trust_remote_code=false: the model's bundled modeling_deepseek.py is incompatible
+# with transformers 5.5.4 (is_torch_fx_available removed) -> use the built-in
+# DeepseekV2ForCausalLM. vllm has its own DeepseekV2 impl (unaffected).
+# Selected via --model deepseek_v2_lite
+
+model:
+  name: DeepSeek-V2-Lite
+  hf_model_path: /mnt/sfs_turbo/models/DeepSeek-V2-Lite
+  architecture: deepseek
+  trust_remote_code: false
+
+precision:
+  dtype: bfloat16
+  attn_implementation: eager
+  enforce_eager: true
+  quantization_config: null
+  tp_size: 1
+  dp_size: 1
+
+hook_spec: models/hooks/deepseek.yaml
+
+prompt: "The quick brown fox jumps over the lazy dog. The capital of France is"
+max_new_tokens: 8
+
+vllm:
+  versions:
+    "0.21.1":
+      pythonpath: []
+      env: {}
+
+compare:
+  thresholds:
+    cosine: 0.95
+    abs_mean_rel_diff: 0.05
+    norm_rel_diff: 0.05
+
+output_dir: ./dumped
+
+env:
+  ASCEND_DEVICE_ID: "0,1"
+  VLLM_VERSION: "0.21.0"
+  VLLM_ALLOW_INSECURE_SERIALIZATION: "1"

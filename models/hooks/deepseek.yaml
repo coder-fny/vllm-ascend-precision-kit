@@ -1,0 +1,32 @@
+# HookSpec for DeepSeek-V2 architecture (MLA attention + MoE/dense MLP).
+# Module boundaries match the standard Llama/Qwen layout (input_layernorm,
+# self_attn, post_attention_layernorm, mlp, model.norm, lm_head). MLA uses
+# q_proj / kv_a_proj_with_mqa / kv_a_layernorm / kv_b_proj / o_proj (no
+# separate k_proj/v_proj). DeepSeek-V2-Lite has dense MLP in early layers and
+# MoE in later layers; gate/up/down_proj hooks register on dense layers, skip
+# on MoE. ln2_in reconstructed by runner (fused AddRMSNorm); ln1_in fixed
+# (vllm += prev mlp_out) — same quirks as Qwen3.
+
+architecture: deepseek
+num_layers_from: config.num_hidden_layers
+
+hook_points:
+  # --- 模块边界 ---
+  - {id: "layers.{L}.ln1_in",   module: "model.layers.{L}.input_layernorm",          capture: input,  replicated: true}
+  - {id: "layers.{L}.attn_out", module: "model.layers.{L}.self_attn",                capture: output, replicated: true}   # o_proj all-reduced -> full
+  - {id: "layers.{L}.mlp_out",  module: "model.layers.{L}.mlp",                      capture: output, replicated: true}   # down_proj all-reduced -> full
+  - {id: "final_norm",          module: "model.norm",                                capture: output, replicated: true}
+  - {id: "logits",              module: "lm_head",                                   capture: output, replicated: true}
+
+  # --- MLA 算子边界 ---
+  - {id: "layers.{L}.q_proj.out",          module: "model.layers.{L}.self_attn.q_proj",              capture: output, replicated: false}  # column-parallel shard
+  - {id: "layers.{L}.kv_a_proj.out",       module: "model.layers.{L}.self_attn.kv_a_proj_with_mqa",  capture: output, replicated: true}   # MQA shared -> replicated
+  - {id: "layers.{L}.kv_b_proj.out",       module: "model.layers.{L}.self_attn.kv_b_proj",           capture: output, replicated: false}  # expands per-head -> shard
+  - {id: "layers.{L}.o_proj.in",           module: "model.layers.{L}.self_attn.o_proj",              capture: input,  replicated: false}
+  - {id: "layers.{L}.o_proj.out",          module: "model.layers.{L}.self_attn.o_proj",              capture: output, replicated: true}   # all-reduced -> full
+  - {id: "layers.{L}.gate_proj.out",       module: "model.layers.{L}.mlp.gate_proj",                 capture: output, replicated: false}
+  - {id: "layers.{L}.up_proj.out",         module: "model.layers.{L}.mlp.up_proj",                   capture: output, replicated: false}
+  - {id: "layers.{L}.down_proj.in",        module: "model.layers.{L}.mlp.down_proj",                 capture: input,  replicated: false}
+  - {id: "layers.{L}.down_proj.out",       module: "model.layers.{L}.mlp.down_proj",                 capture: output, replicated: true}   # all-reduced -> full
+
+overrides: {}
