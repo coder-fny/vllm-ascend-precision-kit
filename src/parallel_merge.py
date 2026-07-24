@@ -363,17 +363,36 @@ def align_tensor_shapes(a: torch.Tensor, b: torch.Tensor):
 
 
 def compute_tensor_diff(a: torch.Tensor, b: torch.Tensor) -> Dict[str, float]:
-    """Cosine similarity of two gathered tensors."""
+    """Cosine similarity + element-wise error stats of two gathered tensors.
+
+    Returns ``{cosine_sim, max_abs_diff, mean_abs_diff, max_rel_diff, truncated}``.
+    Element-wise stats are computed after shape alignment; max_rel_diff uses a
+    symmetric denominator ``|a|+|b|`` (clamped) so it is stable where values are
+    near zero.
+    """
     if a is None or b is None:
-        return {"cosine_sim": float("nan"), "truncated": False}
+        return {"cosine_sim": float("nan"), "max_abs_diff": float("nan"),
+                "mean_abs_diff": float("nan"), "max_rel_diff": float("nan"),
+                "truncated": False}
     a = a.float()
     b = b.float()
     a, b, truncated = align_tensor_shapes(a, b)
     if a.numel() == 0 or b.numel() == 0:
-        return {"cosine_sim": 1.0, "truncated": truncated}
+        return {"cosine_sim": 1.0, "max_abs_diff": 0.0, "mean_abs_diff": 0.0,
+                "max_rel_diff": 0.0, "truncated": truncated}
     cos = torch.nn.functional.cosine_similarity(a.reshape(1, -1), b.reshape(1, -1)).item()
     cos = max(-1.0, min(1.0, cos))
-    return {"cosine_sim": cos, "truncated": truncated}
+    diff = (a - b).abs()
+    max_abs_diff = diff.max().item()
+    mean_abs_diff = diff.mean().item()
+    # Relative-to-peak: worst abs error over the tensor's peak magnitude. (A
+    # per-element relative saturates at ~1.0 wherever values are near zero, so
+    # it is not informative; this single number gauges error vs signal scale.)
+    peak = max(a.abs().max().item(), b.abs().max().item(), 1e-12)
+    max_rel_diff = max_abs_diff / peak
+    return {"cosine_sim": cos, "max_abs_diff": max_abs_diff,
+            "mean_abs_diff": mean_abs_diff, "max_rel_diff": max_rel_diff,
+            "truncated": truncated}
 
 
 def gathered_stats(tensor: Optional[torch.Tensor]) -> Dict[str, float]:

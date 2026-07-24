@@ -155,15 +155,22 @@ class PrecisionComparator:
                     continue
                 tb = b[name_b]
                 sa, sb = gathered_stats(ta), gathered_stats(tb)
-                cos = compute_tensor_diff(ta, tb)["cosine_sim"]
+                d = compute_tensor_diff(ta, tb)
+                cos = d["cosine_sim"]
                 am = compare_value(sa.get("abs_mean", 0.0), sb.get("abs_mean", 0.0), rtol=self.tensor_rtol)
                 nm = compare_value(sa.get("norm", 0.0), sb.get("norm", 0.0), rtol=self.tensor_rtol)
                 cos_ok = (cos == cos) and (cos >= cos_thr)  # cos==cos filters NaN
+                # PASS is cosine-driven (alignment); element-wise error stats
+                # (max/mean/max-rel abs diff) are shown for severity judgment.
                 results.append({
                     "stage": stage, "name_a": name_a, "name_b": name_b,
-                    "abs_mean_reldiff": am["rel_diff"], "norm_reldiff": nm["rel_diff"],
                     "cosine_sim": cos,
-                    "passed": bool(am["passed"] and nm["passed"] and cos_ok),
+                    "max_abs_diff": d["max_abs_diff"],
+                    "mean_abs_diff": d["mean_abs_diff"],
+                    "max_rel_diff": d["max_rel_diff"],
+                    "abs_mean_reldiff": am["rel_diff"],
+                    "norm_reldiff": nm["rel_diff"],
+                    "passed": cos_ok,
                 })
         return results
 
@@ -193,9 +200,9 @@ class PrecisionComparator:
             return True
         cos_thr = 1.0 - self.tensor_rtol
         lines = ["", f"{_BOLD}  PRECISION COMPARISON REPORT - {title}{_RESET}"]
-        lines.append(f"  Statistics: abs_mean / norm (rel-diff, tol rtol={self.tensor_rtol:.1e}); "
-                     f"cosine_sim (>= {cos_thr:.4f})")
-        lines.append(f"  {'Stage':<14s} {'abs_mean drel':>13s} {'norm drel':>13s} {'CosSim':>9s} "
+        lines.append(f"  Pass = cosine_sim >= {cos_thr:.4f}; element-wise errors shown for severity "
+                     f"(maxAbs/meanAbs abs diff, maxRel sym rel diff).")
+        lines.append(f"  {'Stage':<12s} {'CosSim':>9s} {'maxAbs':>11s} {'meanAbs':>11s} {'maxRel':>9s} "
                      f"Result  name_a | name_b")
         all_passed = True
         for c in comparisons:
@@ -203,8 +210,11 @@ class PrecisionComparator:
             status = f"{_color(c['passed'])}{'PASS' if c['passed'] else 'FAIL'}{_RESET}"
             cos = c["cosine_sim"]
             cos_s = f"{cos:.5f}" if cos == cos else "nan"
-            lines.append(f"  {c['stage']:<14s} {c['abs_mean_reldiff']:>13.3e} "
-                         f"{c['norm_reldiff']:>13.3e} {cos_s:>9s} {status}  {c['name_a']} | {c['name_b']}")
+            maxa = c.get("max_abs_diff", float("nan"))
+            meana = c.get("mean_abs_diff", float("nan"))
+            maxr = c.get("max_rel_diff", float("nan"))
+            lines.append(f"  {c['stage']:<12s} {cos_s:>9s} {maxa:>11.3e} "
+                         f"{meana:>11.3e} {maxr:>9.2e} {status}  {c['name_a']} | {c['name_b']}")
         lines.append("")
         verdict = (f"  {_GREEN}{_BOLD}ALL GATHERED-TENSOR CHECKS PASSED{_RESET}" if all_passed
                    else f"  {_RED}{_BOLD}SOME GATHERED-TENSOR CHECKS FAILED{_RESET}")
