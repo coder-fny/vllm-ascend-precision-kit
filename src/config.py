@@ -259,7 +259,7 @@ class UnifiedConfig:
         args.prompt = getattr(args, "prompt", None) or self.prompt
         args.max_new_tokens = getattr(args, "max_new_tokens", None) or self.max_new_tokens
 
-        if not getattr(args, "output_dir", None) or args.output_dir in (None, "/tmp/precision_compare"):
+        if not getattr(args, "output_dir", None) or args.output_dir in (None, "/tmp/vllm_precision"):
             args.output_dir = self.output_dir
 
         args.precision_params = self.get_precision_params()
@@ -267,7 +267,7 @@ class UnifiedConfig:
         args.enforce_eager = self.enforce_eager
         args.attn_implementation = self.attn_implementation
         args.quantization_config = self.quantization_config
-        args.tp_size = self.tp_size
+        args.tp_size = getattr(args, "tp", None) or self.tp_size
         args.dp_size = self.dp_size
         args.compare_thresholds = self.compare_thresholds
         args.vllm_versions = self.vllm_versions

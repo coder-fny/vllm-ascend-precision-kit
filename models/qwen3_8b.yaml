@@ -1,0 +1,37 @@
+# Qwen3-8B — verification model on mm-bench-a3 (8B dense, 36 layers)
+# Selected via --model qwen3_8b or MODEL=qwen3_8b
+
+model:
+  name: Qwen3-8B
+  hf_model_path: /mnt/sfs_turbo/models/Qwen3-8B
+  architecture: qwen3
+
+precision:
+  dtype: bfloat16
+  attn_implementation: eager
+  enforce_eager: true
+  quantization_config: null
+  tp_size: 1
+  dp_size: 1
+
+hook_spec: models/hooks/qwen3.yaml
+
+prompt: "The quick brown fox jumps over the lazy dog. The capital of France is"
+max_new_tokens: 8
+
+vllm:
+  versions:
+    "0.21.1":
+      pythonpath: []
+      env: {}
+
+compare:
+  thresholds:
+    cosine: 0.95
+    abs_mean_rel_diff: 0.05
+    norm_rel_diff: 0.05
+
+output_dir: ./dumped/qwen3_8b
+
+env:
+  ASCEND_DEVICE_ID: "0"

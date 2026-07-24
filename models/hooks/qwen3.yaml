@@ -1,0 +1,34 @@
+# HookSpec for Qwen3 architecture.
+# Qwen3 shares Qwen2's layernorm/projection naming (input_layernorm,
+# self_attn.{q,k,v,o}_proj, post_attention_layernorm, mlp.{gate,up,down}_proj,
+# model.norm, lm_head). Qwen3 additionally has self_attn.{q,k}_norm (not hooked
+# here — add if needed). Module boundaries identical to qwen2.yaml.
+
+architecture: qwen3
+num_layers_from: config.num_hidden_layers
+
+hook_points:
+  # replicated = tensor is full on every TP rank (layernorms, row-parallel
+  # all-reduced outputs). Non-replicated = column-parallel shard, concatenated
+  # along the hidden dim at merge time. (vllm TP semantics; transformers TP=1
+  # ignores the flag.)
+  # --- 模块边界 ---
+  - {id: "layers.{L}.ln1_in",   module: "model.layers.{L}.input_layernorm",          capture: input,  replicated: true}
+  - {id: "layers.{L}.attn_out", module: "model.layers.{L}.self_attn",                capture: output, replicated: true}   # o_proj all-reduced -> full
+  - {id: "layers.{L}.ln2_in",   module: "model.layers.{L}.post_attention_layernorm", capture: input,  replicated: true}
+  - {id: "layers.{L}.mlp_out",  module: "model.layers.{L}.mlp",                      capture: output, replicated: true}   # down_proj all-reduced -> full
+  - {id: "final_norm",          module: "model.norm",                                capture: output, replicated: true}
+  - {id: "logits",              module: "lm_head",                                   capture: output, replicated: true}
+
+  # --- 可访问算子边界（供单算子复现取真实输入/定位）---
+  - {id: "layers.{L}.q_proj.out",     module: "model.layers.{L}.self_attn.q_proj",  capture: output, replicated: false}  # column-parallel shard
+  - {id: "layers.{L}.k_proj.out",     module: "model.layers.{L}.self_attn.k_proj",  capture: output, replicated: false}
+  - {id: "layers.{L}.v_proj.out",     module: "model.layers.{L}.self_attn.v_proj",  capture: output, replicated: false}
+  - {id: "layers.{L}.o_proj.in",      module: "model.layers.{L}.self_attn.o_proj",  capture: input,  replicated: false}  # row-parallel input shard
+  - {id: "layers.{L}.o_proj.out",     module: "model.layers.{L}.self_attn.o_proj",  capture: output, replicated: true}   # all-reduced -> full
+  - {id: "layers.{L}.gate_proj.out",  module: "model.layers.{L}.mlp.gate_proj",     capture: output, replicated: false}
+  - {id: "layers.{L}.up_proj.out",    module: "model.layers.{L}.mlp.up_proj",       capture: output, replicated: false}
+  - {id: "layers.{L}.down_proj.in",   module: "model.layers.{L}.mlp.down_proj",     capture: input,  replicated: false}
+  - {id: "layers.{L}.down_proj.out",  module: "model.layers.{L}.mlp.down_proj",     capture: output, replicated: true}   # all-reduced -> full
+
+overrides: {}
