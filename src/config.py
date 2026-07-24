@@ -288,7 +288,7 @@ class UnifiedConfig:
         args.tp_size = getattr(args, "tp", None) or self.tp_size
         args.dp_size = self.dp_size
         args.trust_remote_code = self.trust_remote_code
-        args.quantization_config = getattr(args, "quantization", None) or self.quantization_config
+        args.quantization_config = self.quantization_config
         args.compare_thresholds = self.compare_thresholds
         args.vllm_versions = self.vllm_versions
         return args
