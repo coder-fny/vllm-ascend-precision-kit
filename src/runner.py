@@ -60,6 +60,7 @@ class DumpRunner:
             "quantization_config": self.cfg.quantization_config,
             "tp_size": getattr(self.args, "tp_size", None) or self.cfg.tp_size,
             "dp_size": self.cfg.dp_size,
+            "trust_remote_code": self.cfg.trust_remote_code,
         }
 
     def run(self):

@@ -210,6 +210,12 @@ class UnifiedConfig:
     def dp_size(self) -> int:
         return int(self.model_yaml.get("precision", {}).get("dp_size", 1))
 
+    @property
+    def trust_remote_code(self) -> bool:
+        # Default True; set false for models whose bundled custom modeling code
+        # is incompatible with the installed transformers (use the built-in arch).
+        return bool(self.model_yaml.get("model", {}).get("trust_remote_code", True))
+
     # ------------------------------------------------------------------
     # vllm-ascend versions
     # ------------------------------------------------------------------
@@ -269,6 +275,7 @@ class UnifiedConfig:
         args.quantization_config = self.quantization_config
         args.tp_size = getattr(args, "tp", None) or self.tp_size
         args.dp_size = self.dp_size
+        args.trust_remote_code = self.trust_remote_code
         args.compare_thresholds = self.compare_thresholds
         args.vllm_versions = self.vllm_versions
         return args

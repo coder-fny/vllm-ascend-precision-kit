@@ -40,9 +40,10 @@ class TransformersBackend(InferenceBackend):
         dtype = _DTYPE_MAP.get(config.get("dtype", "bfloat16"), torch.bfloat16)
         attn_impl = config.get("attn_implementation", "eager")
         quant_cfg = config.get("quantization_config")
+        trc = config.get("trust_remote_code", True)
 
-        self._config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
-        self._tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        self._config = AutoConfig.from_pretrained(model_path, trust_remote_code=trc)
+        self._tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=trc)
 
         try:
             import torch_npu  # noqa: F401  # registers the npu backend
@@ -52,7 +53,7 @@ class TransformersBackend(InferenceBackend):
         kwargs = dict(
             torch_dtype=dtype,
             attn_implementation=attn_impl,
-            trust_remote_code=True,
+            trust_remote_code=trc,
         )
         if quant_cfg:
             kwargs["quantization_config"] = quant_cfg

@@ -61,13 +61,14 @@ class VllmAscendBackend(InferenceBackend):
         enforce_eager = bool(config.get("enforce_eager", True))   # keeps fusion, no graph
         tp = int(config.get("tp_size", 1))
         quant = config.get("quantization_config")
+        trc = config.get("trust_remote_code", True)
 
         kwargs = dict(
             model=model_path,
             dtype=dtype,
             enforce_eager=enforce_eager,
             tensor_parallel_size=tp,
-            trust_remote_code=True,
+            trust_remote_code=trc,
         )
         if quant:
             # vllm quantization name (e.g. 'ascendw8a8') or a QuantConfig
