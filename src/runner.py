@@ -88,7 +88,44 @@ class DumpRunner:
         # Backend handles hook registration + forward (in-process or apply_model).
         self.backend.run_dump(spec, dump_mgr, self.args.phase, self.args.prompt)
 
+        # Reconstruct the post-attention residual (ln2_in) = ln1_in + attn_out.
+        # vllm's fused AddRMSNorm hides this (post_attention_layernorm's residual
+        # arg is the pre-attn residual), so we derive it uniformly for both sides.
+        self._reconstruct_residuals(dump_mgr, num_layers, self.args.phase)
+
         dump_mgr.flush()
         dump_mgr.print_summary(title=f"DUMP SUMMARY [{side_tag} / {self.args.phase}]")
         print(f"[Runner] dump written to {dump_dir}")
         return dump_dir
+
+    def _reconstruct_residuals(self, dump_mgr, num_layers: int, phase: str):
+        """ln2_in (post-attn residual) = ln1_in (pre-attn residual) + attn_out.
+
+        vllm's fused AddRMSNorm calls post_attention_layernorm(delta, residual)
+        where the residual arg is the PRE-attn residual; the post-attn residual
+        is computed inside the fused op and not pre-hook-accessible. Reconstruct
+        it uniformly for both sides from already-captured ln1_in + attn_out.
+        """
+        import torch
+        added = 0
+        for L in range(num_layers):
+            ln1 = dump_mgr.get_tensor(phase, f"layers.{L}.ln1_in")
+            attn = dump_mgr.get_tensor(phase, f"layers.{L}.attn_out")
+            if ln1 is None or attn is None:
+                continue
+            a, b = ln1, attn
+            # align leading dims (both same-shape within a side, but be safe)
+            if a.dim() != b.dim():
+                if a.dim() > b.dim():
+                    a = a.squeeze(0)
+                else:
+                    b = b.squeeze(0)
+            try:
+                ln2 = a.to(torch.float32) + b.to(torch.float32)
+                ln2 = ln2.to(ln1.dtype)
+                dump_mgr.add(phase, f"layers.{L}.ln2_in", ln2)
+                added += 1
+            except Exception as e:
+                print(f"[Runner] ln2_in reconstruct failed for layer {L}: {e}")
+        if added:
+            print(f"[Runner] reconstructed ln2_in = ln1_in + attn_out for {added} layers")

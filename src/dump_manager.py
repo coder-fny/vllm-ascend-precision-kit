@@ -95,6 +95,13 @@ class TensorDumpManager:
     def add_scalar(self, name: str, value):
         self._scalars[name] = value
 
+    def get_tensor(self, stage: str, name: str):
+        """Return a stored CPU tensor (or None). Stats-only entries return None."""
+        t = self._data.get(stage, {}).get(name)
+        if isinstance(t, torch.Tensor):
+            return t
+        return None
+
     def flush(self):
         for stage, tensors in self._data.items():
             stage_dir = self.rank_dir / stage
