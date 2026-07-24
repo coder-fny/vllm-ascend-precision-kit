@@ -63,3 +63,41 @@ def w_get(m):
     """Retrieve this worker's stash (runs in each worker)."""
     return get()
 
+
+def w_logits(m, final_norm):
+    """Compute logits from the captured final_norm via vllm's lm_head.
+
+    vllm V1 does not call lm_head.forward() during prefill (logits are computed
+    by LogitsProcessor, only for sampled tokens), so the lm_head hook never
+    fires. Recompute full-position logits here from the already-captured
+    final_norm (= model.norm output = lm_head input).
+
+    Tries logits_processor first (returns FULL logits, handles TP vocab gather);
+    falls back to lm_head (may be vocab-sharded -> caller gathers). Returns a
+    CPU tensor [seq, vocab] (or [seq, vocab/tp]) or None.
+    """
+    import torch
+    try:
+        dev = m.lm_head.weight.device
+    except Exception:
+        dev = torch.device("cpu")
+    x = final_norm.to(dev)
+    out = None
+    # (a) LogitsProcessor(lm_head, hidden_states) -> full logits (handles TP gather).
+    #     NOTE: arg order is (lm_head_module, hidden_states), NOT (hidden_states, weight).
+    try:
+        out = m.logits_processor(m.lm_head, x)
+    except Exception:
+        pass
+    # (b) ParallelLMHead(x) -> possibly vocab-sharded logits
+    if out is None:
+        try:
+            out = m.lm_head(x)
+        except Exception:
+            return None
+    if isinstance(out, tuple):
+        out = out[0]
+    if not isinstance(out, torch.Tensor):
+        return None
+    return out.detach().cpu()
+

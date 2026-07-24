@@ -185,6 +185,38 @@ class VllmAscendBackend(InferenceBackend):
         stashes = self._llm.apply_model(worker_stash.w_get)
         # 4. merge into the main-process dump_mgr
         self._merge_stashes(stashes, spec, dump_mgr, phase)
+        # 5. vllm V1 doesn't compute full logits via lm_head.forward (logits
+        # come from LogitsProcessor, only for sampled tokens); recompute full
+        # logits from the captured final_norm via the worker's lm_head.
+        self._capture_logits(dump_mgr, phase)
+
+    def _capture_logits(self, dump_mgr, phase):
+        import functools
+        import torch
+        from .. import worker_stash
+        fn = dump_mgr.get_tensor(phase, "final_norm")
+        if fn is None:
+            print("[vllm-ascend] logits capture skipped: no final_norm")
+            return
+        outs = self._llm.apply_model(functools.partial(worker_stash.w_logits, final_norm=fn))
+        outs = [o for o in outs if o is not None]
+        if not outs:
+            print("[vllm-ascend] logits capture: no output from workers")
+            return
+        vsize = getattr(self._config, "vocab_size", None)
+        if len(outs) == 1:
+            logits = outs[0]
+        elif vsize is not None and outs[0].shape[-1] == vsize:
+            # logits_processor returned full logits (replicated across ranks)
+            logits = outs[0]
+        else:
+            # lm_head is vocab-parallel -> concat shards along vocab dim
+            try:
+                logits = torch.cat(outs, dim=-1)
+            except Exception:
+                logits = outs[0]
+        dump_mgr.add(phase, "logits", logits)
+        print(f"[vllm-ascend] captured logits via apply_model: shape={list(logits.shape)}")
 
     def _merge_stashes(self, stashes, spec, dump_mgr, phase):
         """Merge per-worker stashes into dump_mgr.
