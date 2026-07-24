@@ -157,6 +157,72 @@ class VllmAscendBackend(InferenceBackend):
                     self._llm.llm_engine.model_config.model, trust_remote_code=True)
         return self._tokenizer(prompt, return_tensors="pt").input_ids
 
+    def run_dump(self, spec, dump_mgr, phase: str, prompt: str, ref_tokens=None):
+        """V1 subprocess path: register hooks via apply_model (in each worker),
+        run prefill via llm.generate, then retrieve the worker-side stash.
+
+        vllm-ascend's real fused execution is untouched (enforce_eager only
+        disables graph capture). max_tokens=1 => a single prefill forward, so
+        hooks fire exactly once per module (no decode-step contamination).
+        """
+        from .. import worker_stash
+        import functools
+
+        # 1. reset stash + install hooks in every worker. Use top-level
+        # callables + functools.partial (picklable) since vllm V1 serializes
+        # the func to workers (lambdas/closures are not serializable).
+        self._llm.apply_model(worker_stash.w_reset)
+        self._llm.apply_model(functools.partial(worker_stash.w_register, spec=spec, phase=phase))
+
+        # 2. run prefill (hooks fire in workers -> stash fills)
+        if phase == "prefill":
+            self.run_prefill(self.encode(prompt))
+        else:
+            raise NotImplementedError("decode via run_dump: phase 3 (forced sampler)")
+
+        # 3. retrieve per-worker stashes (list, one entry per TP rank)
+        stashes = self._llm.apply_model(worker_stash.w_get)
+        # 4. merge into the main-process dump_mgr
+        self._merge_stashes(stashes, spec, dump_mgr, phase)
+
+    def _merge_stashes(self, stashes, spec, dump_mgr, phase):
+        """Merge per-worker stashes into dump_mgr.
+
+        TP=1: single stash, take as-is. TP>1: replicated tensors (layernorms,
+        all-reduced outputs) take rank0; sharded tensors concat along hidden.
+        NOTE: the spec's `replicated` flag is a coarse guide — for vllm TP the
+        all-reduced outputs (attn_out/o_proj.out/mlp_out/down_proj.out) are full
+        too; TP>1 gather needs per-op sharding knowledge (phase 2). TP=1 is the
+        verified path.
+        """
+        if not stashes:
+            return
+        if len(stashes) == 1:
+            for stage, named in stashes[0].items():
+                for name, t in named.items():
+                    dump_mgr.add(stage, name, t)
+            return
+        replicated = {p.id for p in spec.hook_points if p.replicated}
+        pairs = set()
+        for s in stashes:
+            for stage, named in s.items():
+                for name in named:
+                    pairs.add((stage, name))
+        for stage, name in sorted(pairs):
+            parts = [s.get(stage, {}).get(name) for s in stashes]
+            parts = [p for p in parts if p is not None]
+            if not parts:
+                continue
+            if name in replicated:
+                dump_mgr.add(stage, name, parts[0])
+            else:
+                try:
+                    from ..parallel_merge import normalize_tensor
+                    full = __import__("torch").cat([normalize_tensor(p) for p in parts], dim=-1)
+                except Exception:
+                    full = parts[0]
+                dump_mgr.add(stage, name, full)
+
     def _decode_prompt(self, input_ids: torch.Tensor) -> str:
         """Best-effort: vllm takes a text prompt or token ids via TokensPrompt."""
         try:

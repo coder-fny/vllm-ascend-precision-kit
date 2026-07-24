@@ -69,6 +69,15 @@ class InferenceBackend(ABC):
                         past_kv: Any = None) -> Tuple[torch.Tensor, Any]:
         """One decode step with KV cache; return (logits [1, vocab], new_past_kv)."""
 
+    def run_dump(self, spec, dump_mgr, phase: str, prompt: str, ref_tokens=None):
+        """Run one phase with hooks registered per ``spec``, dumping to dump_mgr.
+
+        Backends implement: transformers uses in-process hooks (get_model);
+        vllm-ascend V1 uses apply_model + worker_stash (model in subprocess).
+        Default raises — backends must override.
+        """
+        raise NotImplementedError(f"{self.name} backend does not implement run_dump")
+
     # Shared niceties --------------------------------------------------
 
     def finalize(self):
