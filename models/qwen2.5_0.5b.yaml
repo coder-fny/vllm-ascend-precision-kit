@@ -1,0 +1,49 @@
+# Qwen2.5-0.5B — MVP self-check model (dense, 24 layers)
+# Selected via --model qwen2.5_0.5b or MODEL=qwen2.5_0.5b
+
+# === 必填：模型信息 ===
+model:
+  name: Qwen2.5-0.5B
+  hf_model_path: /mnt/sfs_turbo/cjs02503376/caojiangsheng/data/models/Qwen2.5-0.5B   # 调整为实际路径
+  architecture: qwen2
+
+# === 精度参数（三层防护注册表）===
+precision:
+  dtype: bfloat16
+  attn_implementation: eager        # op 级可比，禁用 sdpa/flash 融合 attention 实现
+  enforce_eager: true               # vllm-ascend: 仅关图，保留融合 kernel
+  quantization_config: null         # null=不量化；量化时填 Ascend 方案名（两侧可不同）
+  tp_size: 1
+  dp_size: 1
+
+# === HookSpec（按架构自动选；也可显式指定）===
+hook_spec: models/hooks/qwen2.yaml
+
+# === 推理输入 ===
+prompt: "The quick brown fox jumps over the lazy dog. The capital of France is"
+max_new_tokens: 8
+
+# === vllm-ascend 版本（不同版本可能在不同容器，离线 dump 天然支持）===
+vllm:
+  versions:
+    "0.19.1":
+      pythonpath: []
+      env: {}
+    "0.20.2":
+      pythonpath: []
+      env: {}
+
+# === 对比阈值 ===
+compare:
+  thresholds:
+    cosine: 0.95
+    abs_mean_rel_diff: 0.05
+    norm_rel_diff: 0.05
+
+# === 路径 ===
+output_dir: ./dumped/qwen2.5_0.5b
+
+# === 环境变量 ===
+env:
+  ASCEND_DEVICE_ID: "0"
+  HCCL_SOCKET_IFNAME: eth0

@@ -1,0 +1,37 @@
+# HookSpec for Qwen2 / Qwen2.5 architecture.
+# Declares every hook boundary: module path (with {L}) + capture point +
+# canonical dump id ("dump 的位置"). Both sides (transformers / vllm-ascend)
+# use this same spec, so dump keys match identically — no name_map needed.
+#
+# capture: input  -> forward_pre_hook on the residual (pre-norm)
+# capture: output -> forward_hook on the module output
+# replicated: true  -> TP-replicated (rank0 full); false -> TP-sharded (gather)
+#
+# 模块边界（定位第一刀）+ 可访问算子边界（单算子复现取输入/下钻）。
+# 融合发生在 attention 核心内部，不阻塞这些边界 hook。
+
+architecture: qwen2
+num_layers_from: config.num_hidden_layers
+
+hook_points:
+  # --- 模块边界 ---
+  - {id: "layers.{L}.ln1_in",   module: "model.layers.{L}.input_layernorm",          capture: input,  replicated: true}
+  - {id: "layers.{L}.attn_out", module: "model.layers.{L}.self_attn",                capture: output, replicated: false}
+  - {id: "layers.{L}.ln2_in",   module: "model.layers.{L}.post_attention_layernorm", capture: input,  replicated: true}
+  - {id: "layers.{L}.mlp_out",  module: "model.layers.{L}.mlp",                      capture: output, replicated: false}
+  - {id: "final_norm",          module: "model.norm",                                capture: output, replicated: true}
+  - {id: "logits",              module: "lm_head",                                   capture: output, replicated: true}
+
+  # --- 可访问算子边界（供单算子复现取真实输入/定位）---
+  - {id: "layers.{L}.q_proj.out",     module: "model.layers.{L}.self_attn.q_proj",  capture: output, replicated: false}
+  - {id: "layers.{L}.k_proj.out",     module: "model.layers.{L}.self_attn.k_proj",  capture: output, replicated: false}
+  - {id: "layers.{L}.v_proj.out",     module: "model.layers.{L}.self_attn.v_proj",  capture: output, replicated: false}
+  - {id: "layers.{L}.o_proj.in",      module: "model.layers.{L}.self_attn.o_proj",  capture: input,  replicated: false}
+  - {id: "layers.{L}.o_proj.out",     module: "model.layers.{L}.self_attn.o_proj",  capture: output, replicated: false}
+  - {id: "layers.{L}.gate_proj.out",  module: "model.layers.{L}.mlp.gate_proj",     capture: output, replicated: false}
+  - {id: "layers.{L}.up_proj.out",    module: "model.layers.{L}.mlp.up_proj",       capture: output, replicated: false}
+  - {id: "layers.{L}.down_proj.in",   module: "model.layers.{L}.mlp.down_proj",     capture: input,  replicated: false}
+  - {id: "layers.{L}.down_proj.out",  module: "model.layers.{L}.mlp.down_proj",     capture: output, replicated: false}
+
+# 跨版本/跨侧模块名差异时在此覆盖（按 id 合并）
+overrides: {}
