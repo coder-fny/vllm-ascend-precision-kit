@@ -175,20 +175,35 @@ class VllmAscendBackend(InferenceBackend):
         self._llm.apply_model(worker_stash.w_reset)
         self._llm.apply_model(functools.partial(worker_stash.w_register, spec=spec, phase=phase))
 
-        # 2. run prefill (hooks fire in workers -> stash fills)
+        # 2. run prefill or forced decode. Hooks fire in workers and are tagged
+        #    by the forward counter (prefill, decode/step_*) via step_stage().
         if phase == "prefill":
             self.run_prefill(self.encode(prompt))
+        elif phase == "decode":
+            if not ref_tokens:
+                raise ValueError("decode requires ref_tokens")
+            input_ids = self.encode(prompt)
+            prompt_len = int(input_ids.shape[-1])
+            ref = [int(t) for t in ref_tokens]
+            forcer = functools.partial(worker_stash.w_force, ref=ref, prompt_len=prompt_len)
+            from vllm import SamplingParams
+            # max_tokens = len(ref)+1 so every ref token is fed back as a decode
+            # forward (the +1th token is sampled freely). This yields N decode
+            # forwards processing ref[0..N-1], aligned with the HF decode loop.
+            sp = SamplingParams(temperature=0.0, max_tokens=len(ref) + 1)
+            sp.logits_processors = [forcer]
+            self._llm.generate([self._decode_prompt(input_ids)], sp)
         else:
-            raise NotImplementedError("decode via run_dump: phase 3 (forced sampler)")
+            raise ValueError(f"unknown phase: {phase}")
 
         # 3. retrieve per-worker stashes (list, one entry per TP rank)
         stashes = self._llm.apply_model(worker_stash.w_get)
-        # 4. merge into the main-process dump_mgr
+        # 4. merge into the main-process dump_mgr (all stages: prefill + decode/step_*)
         self._merge_stashes(stashes, spec, dump_mgr, phase)
-        # 5. vllm V1 doesn't compute full logits via lm_head.forward (logits
-        # come from LogitsProcessor, only for sampled tokens); recompute full
-        # logits from the captured final_norm via the worker's lm_head.
-        self._capture_logits(dump_mgr, phase)
+        # 5. logits recompute from final_norm (prefill only; per-step decode
+        #    logits recompute is TODO).
+        if phase == "prefill":
+            self._capture_logits(dump_mgr, phase)
 
     def _capture_logits(self, dump_mgr, phase):
         import functools

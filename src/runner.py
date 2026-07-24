@@ -98,29 +98,41 @@ class DumpRunner:
         dump_mgr = TensorDumpManager(dump_dir, rank=0, per_layer=per_layer)
 
         # Backend handles hook registration + forward (in-process or apply_model).
-        self.backend.run_dump(spec, dump_mgr, self.args.phase, self.args.prompt)
+        ref_tokens = None
+        if self.args.phase == "decode":
+            ref_tokens = self._load_ref_tokens()
+        self.backend.run_dump(spec, dump_mgr, self.args.phase, self.args.prompt,
+                              ref_tokens=ref_tokens)
 
-        # Reconstruct the post-attention residual (ln2_in) = ln1_in + attn_out.
-        # vllm's fused AddRMSNorm hides this (post_attention_layernorm's residual
-        # arg is the pre-attn residual), so we derive it uniformly for both sides.
-        self._reconstruct_residuals(dump_mgr, num_layers, self.args.phase)
+        # Reconstruct the post-attention residual (ln2_in) = ln1_in + attn_out,
+        # and fix vllm ln1_in (+= prev mlp_out), for EVERY captured stage
+        # (prefill + decode/step_*).
+        self._reconstruct_residuals(dump_mgr, num_layers)
 
         dump_mgr.flush()
         dump_mgr.print_summary(title=f"DUMP SUMMARY [{side_tag} / {self.args.phase}]")
         print(f"[Runner] dump written to {dump_dir}")
         return dump_dir
 
-    def _reconstruct_residuals(self, dump_mgr, num_layers: int, phase: str):
-        """Reconstruct the true per-layer residual stream.
+    def _load_ref_tokens(self):
+        import torch
+        path = getattr(self.args, "ref_tokens", None)
+        if not path:
+            raise ValueError("decode phase requires --ref-tokens (run generate_inputs.py)")
+        toks = torch.load(path, map_location="cpu", weights_only=False)
+        return [int(t) for t in toks]
+
+    def _reconstruct_residuals(self, dump_mgr, num_layers: int):
+        """Reconstruct the true per-layer residual stream for EVERY captured
+        stage (prefill + decode/step_*).
 
         Two vllm fused-AddRMSNorm quirks mean the raw hook capture is not the
         true layer-entering residual:
 
-        1. ln1_in (input_layernorm args[1]): vllm calls
-           ``input_layernorm(prev_mlp_delta, residual)`` and adds prev_mlp_delta
-           to residual INSIDE the fused norm. So args[1] is the residual BEFORE
-           that add — it is missing the previous layer's mlp_out. (HF adds mlp
-           before the next norm, so its ln1_in is already correct.)
+        1. ln1_in (input_layernorm args[1]): vllm adds prev_mlp_delta to the
+           residual INSIDE the fused norm, so args[1] misses the previous
+           layer's mlp_out. (HF adds mlp before the next norm, so its ln1_in is
+           already correct.)
            => vllm only: ln1_in[L] = captured_ln1_in[L] + mlp_out[L-1]  (L>0).
 
         2. ln2_in (post_attention_layernorm): the post-attn residual is fused
@@ -137,35 +149,29 @@ class DumpRunner:
                     b = b.squeeze(0)
             return (a.to(torch.float32) + b.to(torch.float32))
 
-        # (1) vllm ln1_in: add the missing previous layer's mlp_out.
-        if getattr(self.args, "side", "") == "vllm_ascend":
-            fixed = 0
-            for L in range(1, num_layers):
-                cur = dump_mgr.get_tensor(phase, f"layers.{L}.ln1_in")
-                prev_mlp = dump_mgr.get_tensor(phase, f"layers.{L - 1}.mlp_out")
-                if cur is None or prev_mlp is None:
+        is_vllm = getattr(self.args, "side", "") == "vllm_ascend"
+        for stage in dump_mgr.stages():
+            # (1) vllm ln1_in: add the missing previous layer's mlp_out.
+            if is_vllm:
+                for L in range(1, num_layers):
+                    cur = dump_mgr.get_tensor(stage, f"layers.{L}.ln1_in")
+                    prev_mlp = dump_mgr.get_tensor(stage, f"layers.{L - 1}.mlp_out")
+                    if cur is None or prev_mlp is None:
+                        continue
+                    try:
+                        dump_mgr.add(stage, f"layers.{L}.ln1_in",
+                                     _add(cur, prev_mlp).to(cur.dtype))
+                    except Exception as e:
+                        print(f"[Runner] vllm ln1_in fix failed {stage} L{L}: {e}")
+            # (2) ln2_in = ln1_in + attn_out (uses the corrected ln1_in).
+            for L in range(num_layers):
+                ln1 = dump_mgr.get_tensor(stage, f"layers.{L}.ln1_in")
+                attn = dump_mgr.get_tensor(stage, f"layers.{L}.attn_out")
+                if ln1 is None or attn is None:
                     continue
                 try:
-                    true = _add(cur, prev_mlp).to(cur.dtype)
-                    dump_mgr.add(phase, f"layers.{L}.ln1_in", true)
-                    fixed += 1
+                    dump_mgr.add(stage, f"layers.{L}.ln2_in",
+                                 _add(ln1, attn).to(ln1.dtype))
                 except Exception as e:
-                    print(f"[Runner] vllm ln1_in fix failed for layer {L}: {e}")
-            if fixed:
-                print(f"[Runner] vllm: fixed ln1_in += prev mlp_out for {fixed} layers")
-
-        # (2) ln2_in = ln1_in + attn_out (uniform, uses the corrected ln1_in).
-        added = 0
-        for L in range(num_layers):
-            ln1 = dump_mgr.get_tensor(phase, f"layers.{L}.ln1_in")
-            attn = dump_mgr.get_tensor(phase, f"layers.{L}.attn_out")
-            if ln1 is None or attn is None:
-                continue
-            try:
-                ln2 = _add(ln1, attn).to(ln1.dtype)
-                dump_mgr.add(phase, f"layers.{L}.ln2_in", ln2)
-                added += 1
-            except Exception as e:
-                print(f"[Runner] ln2_in reconstruct failed for layer {L}: {e}")
-        if added:
-            print(f"[Runner] reconstructed ln2_in = ln1_in + attn_out for {added} layers")
+                    print(f"[Runner] ln2_in reconstruct failed {stage} L{L}: {e}")
+        print(f"[Runner] reconstructed residuals for stages: {dump_mgr.stages()}")

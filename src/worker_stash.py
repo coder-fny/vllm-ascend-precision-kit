@@ -15,10 +15,12 @@ inside a hook closure resolves to THIS worker's copy of the global.
 
 _STASH: dict = {}          # {stage: {name: cpu_tensor}}
 _STAGE: list = ["prefill"]
+_STEP: list = [0]          # forward counter: 1=prefill, 2+=decode steps
 
 
 def reset():
     _STASH.clear()
+    _STEP[0] = 0
 
 
 def set_stage(stage: str):
@@ -27,6 +29,24 @@ def set_stage(stage: str):
 
 def stage() -> str:
     return _STAGE[0]
+
+
+def incr_step() -> int:
+    _STEP[0] += 1
+    return _STEP[0]
+
+
+def step_stage() -> str:
+    """Map the forward counter to a dump stage.
+
+    forward #1 = prefill; forward #2 = decode/step_0; #3 = decode/step_1; ...
+    (vllm prefill + N decode forwards align with HF prefill + N decode steps,
+    both processing ref token i at decode/step_i.)
+    """
+    n = _STEP[0]
+    if n <= 1:
+        return "prefill"
+    return f"decode/step_{n - 2}"
 
 
 def add(stage: str, name: str, tensor):
@@ -53,15 +73,52 @@ def w_reset(m):
     reset()
 
 
+def _w_incr_step(module, args):
+    """Top-level forward_pre_hook on the top-level model: bump the forward
+    counter at the start of each forward so boundary hooks (on sub-modules,
+    which fire after) tag the right stage. Picklable (top-level)."""
+    incr_step()
+
+
 def w_register(m, spec, phase):
-    """Install hooks on the worker's model shard (runs in each worker)."""
+    """Install hooks on the worker's model shard (runs in each worker).
+
+    The stage is derived from the forward counter (prefill vs decode/step_*)
+    via step_stage(), so the same hooks serve prefill and forced-decode runs.
+    """
     from .hooks import HookRegistry
-    HookRegistry(m, spec, add, phase).register()
+    reg = HookRegistry(m, spec, add, phase)
+    reg.stage_provider = step_stage
+    reg.register()
+    # Counter hook on the top-level model (fires before sub-module hooks).
+    try:
+        m.register_forward_pre_hook(_w_incr_step)
+    except Exception:
+        pass
 
 
 def w_get(m):
     """Retrieve this worker's stash (runs in each worker)."""
     return get()
+
+
+def w_force(token_ids, logits, ref=None, prompt_len=0):
+    """LogitsProcessor: force the next token to ref[step], where
+    step = len(token_ids) - prompt_len. Used for forced decode so vllm walks the
+    exact reference token path (aligned with the transformers decode loop).
+
+    Pass via functools.partial(w_force, ref=[...], prompt_len=N). Top-level +
+    picklable so it survives serialization to the EngineCore. max_tokens should
+    be len(ref)+1 so every ref token is fed back as a decode forward.
+    """
+    if ref is None:
+        return logits
+    step = len(token_ids) - prompt_len
+    if 0 <= step < len(ref):
+        forced = int(ref[step])
+        logits[:] = float("-inf")
+        logits[..., forced] = 0.0
+    return logits
 
 
 def w_logits(m, final_norm):

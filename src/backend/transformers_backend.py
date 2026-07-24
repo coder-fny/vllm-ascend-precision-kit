@@ -112,10 +112,30 @@ class TransformersBackend(InferenceBackend):
         registry.current_stage = phase
         registry.register()
         try:
+            input_ids = self.encode(prompt)
             if phase == "prefill":
-                self.run_prefill(self.encode(prompt))
+                registry.current_stage = "prefill"
+                self.run_prefill(input_ids)
+            elif phase == "decode":
+                if not ref_tokens:
+                    raise ValueError("decode requires ref_tokens")
+                # Seed KV cache with the prompt (hooks fire, stage=prefill).
+                registry.current_stage = "prefill"
+                with torch.no_grad():
+                    out = self._model(input_ids=input_ids, use_cache=True)
+                kv = out.past_key_values
+                # Forced decode: feed ref[i] one token at a time. Hooks fire
+                # each step (stage=decode/step_i), aligned with vllm's decode
+                # step i (which also processes ref[i]).
+                for i, tok in enumerate(ref_tokens):
+                    registry.current_stage = f"decode/step_{i}"
+                    tok_t = torch.tensor([[tok]], device=self._device)
+                    with torch.no_grad():
+                        out = self._model(input_ids=tok_t, past_key_values=kv,
+                                          use_cache=True)
+                    kv = out.past_key_values
             else:
-                raise NotImplementedError("decode via run_dump: phase 3 (forced decode loop)")
+                raise ValueError(f"unknown phase: {phase}")
         finally:
             registry.remove()
 

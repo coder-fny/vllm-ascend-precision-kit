@@ -102,6 +102,10 @@ class TensorDumpManager:
             return t
         return None
 
+    def stages(self) -> list:
+        """All stage keys captured so far (e.g. prefill, decode/step_0, ...)."""
+        return list(self._data.keys())
+
     def flush(self):
         for stage, tensors in self._data.items():
             stage_dir = self.rank_dir / stage
