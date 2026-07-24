@@ -1,0 +1,51 @@
+# Qwen3-32B — option A: vllm-ascend W8A8 quantized vs transformers bf16 reference.
+# Same base model (Qwen3-32B dense, 64 layers), two forms:
+#   - vllm_ascend side: pre-quantized W8A8 (int8 weights), quantization="ascend"
+#     (reads quant_model_description.json via AscendModelSlimConfig).
+#   - transformers side: bf16 reference (pulled via model-cli), no quantization.
+# Side-specific paths + quantization via the `sides` section.
+# Selected via --model qwen3_32b_w8a8
+
+model:
+  name: Qwen3-32B
+  hf_model_path: /home/admin/model-csi/models/modelhub_12000053_qwen3-32b-81500124_20250818202543/model
+  architecture: qwen3
+  trust_remote_code: true
+
+precision:
+  dtype: bfloat16
+  attn_implementation: eager
+  enforce_eager: true
+  quantization_config: null        # default (transformers bf16 reference)
+  tp_size: 2
+  dp_size: 1
+
+# Side-specific overrides for option A
+sides:
+  vllm_ascend:
+    hf_model_path: /mnt/sfs_turbo/models/Qwen3-32B-w8a8-nopdmix
+    quantization_config: ascend    # AscendModelSlimConfig reads quant_model_description.json -> W8A8
+
+hook_spec: models/hooks/qwen3.yaml
+
+prompt: "The quick brown fox jumps over the lazy dog. The capital of France is"
+max_new_tokens: 8
+
+vllm:
+  versions:
+    "0.21.1":
+      pythonpath: []
+      env: {}
+
+compare:
+  thresholds:
+    cosine: 0.95
+    abs_mean_rel_diff: 0.05
+    norm_rel_diff: 0.05
+
+output_dir: ./dumped
+
+env:
+  ASCEND_DEVICE_ID: "0,1,2,3"
+  VLLM_VERSION: "0.21.0"
+  VLLM_ALLOW_INSECURE_SERIALIZATION: "1"

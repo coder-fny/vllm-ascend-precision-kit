@@ -217,6 +217,18 @@ class UnifiedConfig:
         return bool(self.model_yaml.get("model", {}).get("trust_remote_code", True))
 
     # ------------------------------------------------------------------
+    # Side-specific overrides (e.g. vllm-ascend loads a quantized model while
+    # transformers loads the bf16 reference of the same base).
+    # ------------------------------------------------------------------
+
+    def side_config(self, side: str) -> dict:
+        """Per-side overrides (hf_model_path, quantization_config, tp_size, ...).
+
+        Read from the yaml ``sides.<side>`` section; empty dict if absent.
+        """
+        return self.model_yaml.get("sides", {}).get(side, {}) or {}
+
+    # ------------------------------------------------------------------
     # vllm-ascend versions
     # ------------------------------------------------------------------
 
@@ -276,6 +288,7 @@ class UnifiedConfig:
         args.tp_size = getattr(args, "tp", None) or self.tp_size
         args.dp_size = self.dp_size
         args.trust_remote_code = self.trust_remote_code
+        args.quantization_config = getattr(args, "quantization", None) or self.quantization_config
         args.compare_thresholds = self.compare_thresholds
         args.vllm_versions = self.vllm_versions
         return args

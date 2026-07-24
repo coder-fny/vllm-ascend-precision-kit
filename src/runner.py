@@ -52,13 +52,16 @@ class DumpRunner:
         self.backend = backend
 
     def _backend_config(self) -> dict:
+        sc = self.cfg.side_config(self.args.side)
         return {
-            "hf_model_path": self.args.hf_model_path,
+            "hf_model_path": sc.get("hf_model_path") or self.args.hf_model_path,
             "dtype": self.cfg.dtype,
             "attn_implementation": self.cfg.attn_implementation,
             "enforce_eager": self.cfg.enforce_eager,
-            "quantization_config": self.cfg.quantization_config,
-            "tp_size": getattr(self.args, "tp_size", None) or self.cfg.tp_size,
+            "quantization_config": sc.get(
+                "quantization_config",
+                getattr(self.args, "quantization_config", None) or self.cfg.quantization_config),
+            "tp_size": sc.get("tp_size") or getattr(self.args, "tp_size", None) or self.cfg.tp_size,
             "dp_size": self.cfg.dp_size,
             "trust_remote_code": self.cfg.trust_remote_code,
         }
@@ -73,13 +76,21 @@ class DumpRunner:
             side=self.args.side, version=self.args.vllm_version,
         )
 
+        sc = self.cfg.side_config(self.args.side)
+        quant = sc.get("quantization_config",
+                       getattr(self.args, "quantization_config", None) or self.cfg.quantization_config)
         side_tag = _side_tag(self.args.side, self.args.vllm_version)
+        # Append the quantization scheme to the vllm-ascend dump dir so
+        # quantized vs bf16 dumps don't collide (option A: vllm quant vs HF bf16).
+        if quant and self.args.side == "vllm_ascend":
+            side_tag = f"{side_tag}_{quant}"
         dump_dir = os.path.join(self.args.output_dir, self.cfg.model_name, side_tag)
         _write_meta(dump_dir, rank=0, tp_size=self.cfg.tp_size, dp_size=self.cfg.dp_size,
                     side=self.args.side, version=self.args.vllm_version)
+        pp = self.cfg.get_precision_params()
+        pp["quantization_config"] = quant   # record the EFFECTIVE (side-specific) scheme
         save_config_snapshot(
-            dump_dir, rank=0,
-            precision_params=self.cfg.get_precision_params(),
+            dump_dir, rank=0, precision_params=pp,
             extra={"side": side_tag, "phase": self.args.phase},
         )
 

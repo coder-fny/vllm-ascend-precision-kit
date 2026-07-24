@@ -79,6 +79,8 @@ def build_parser():
     g.add_argument("--ref-tokens", default=None, help="Reference token ids .pt for forced decode")
     g.add_argument("--per-layer", action="store_true", help="Save each tensor to its own .pt")
     g.add_argument("--tp", type=int, default=None, help="Override tensor-parallel size (vllm-ascend)")
+    g.add_argument("--quantization", default=None,
+                   help="Override quantization for the side being dumped (e.g. w8a8_dynamic for vllm-ascend)")
     g.add_argument("--dump-mode", choices=["none", "simple", "full"], default="simple",
                    help="(reserved; boundary hooks always capture in simple/full)")
 
