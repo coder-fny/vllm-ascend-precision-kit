@@ -99,30 +99,58 @@ class DumpRunner:
         return dump_dir
 
     def _reconstruct_residuals(self, dump_mgr, num_layers: int, phase: str):
-        """ln2_in (post-attn residual) = ln1_in (pre-attn residual) + attn_out.
+        """Reconstruct the true per-layer residual stream.
 
-        vllm's fused AddRMSNorm calls post_attention_layernorm(delta, residual)
-        where the residual arg is the PRE-attn residual; the post-attn residual
-        is computed inside the fused op and not pre-hook-accessible. Reconstruct
-        it uniformly for both sides from already-captured ln1_in + attn_out.
+        Two vllm fused-AddRMSNorm quirks mean the raw hook capture is not the
+        true layer-entering residual:
+
+        1. ln1_in (input_layernorm args[1]): vllm calls
+           ``input_layernorm(prev_mlp_delta, residual)`` and adds prev_mlp_delta
+           to residual INSIDE the fused norm. So args[1] is the residual BEFORE
+           that add — it is missing the previous layer's mlp_out. (HF adds mlp
+           before the next norm, so its ln1_in is already correct.)
+           => vllm only: ln1_in[L] = captured_ln1_in[L] + mlp_out[L-1]  (L>0).
+
+        2. ln2_in (post_attention_layernorm): the post-attn residual is fused
+           inside the norm on both sides. Reconstruct uniformly:
+           ln2_in[L] = ln1_in[L] + attn_out[L].
         """
         import torch
+
+        def _add(a, b):
+            if a.dim() != b.dim():
+                if a.dim() > b.dim():
+                    a = a.squeeze(0)
+                else:
+                    b = b.squeeze(0)
+            return (a.to(torch.float32) + b.to(torch.float32))
+
+        # (1) vllm ln1_in: add the missing previous layer's mlp_out.
+        if getattr(self.args, "side", "") == "vllm_ascend":
+            fixed = 0
+            for L in range(1, num_layers):
+                cur = dump_mgr.get_tensor(phase, f"layers.{L}.ln1_in")
+                prev_mlp = dump_mgr.get_tensor(phase, f"layers.{L - 1}.mlp_out")
+                if cur is None or prev_mlp is None:
+                    continue
+                try:
+                    true = _add(cur, prev_mlp).to(cur.dtype)
+                    dump_mgr.add(phase, f"layers.{L}.ln1_in", true)
+                    fixed += 1
+                except Exception as e:
+                    print(f"[Runner] vllm ln1_in fix failed for layer {L}: {e}")
+            if fixed:
+                print(f"[Runner] vllm: fixed ln1_in += prev mlp_out for {fixed} layers")
+
+        # (2) ln2_in = ln1_in + attn_out (uniform, uses the corrected ln1_in).
         added = 0
         for L in range(num_layers):
             ln1 = dump_mgr.get_tensor(phase, f"layers.{L}.ln1_in")
             attn = dump_mgr.get_tensor(phase, f"layers.{L}.attn_out")
             if ln1 is None or attn is None:
                 continue
-            a, b = ln1, attn
-            # align leading dims (both same-shape within a side, but be safe)
-            if a.dim() != b.dim():
-                if a.dim() > b.dim():
-                    a = a.squeeze(0)
-                else:
-                    b = b.squeeze(0)
             try:
-                ln2 = a.to(torch.float32) + b.to(torch.float32)
-                ln2 = ln2.to(ln1.dtype)
+                ln2 = _add(ln1, attn).to(ln1.dtype)
                 dump_mgr.add(phase, f"layers.{L}.ln2_in", ln2)
                 added += 1
             except Exception as e:
