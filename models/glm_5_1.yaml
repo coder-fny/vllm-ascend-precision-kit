@@ -19,7 +19,7 @@ precision:
   dp_size: 1
   max_model_len: 4096
 
-# vllm-ascend side: reduced bf16 checkpoint (20 layers, no quantization) — bf vs bf comparison
+# vllm-ascend side: reduced bf16 checkpoint (20 layers) — bf vs bf MLA drill-down
 sides:
   vllm_ascend:
     hf_model_path: /a3_inference/itask/workdir/models/glm51_20l_ckpt

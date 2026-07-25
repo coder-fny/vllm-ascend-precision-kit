@@ -1,17 +1,35 @@
-# HookSpec for GLM-5/5.1 (GlmMoeDsaForCausalLM). Minimal — standard decoder
-# module boundaries. GLM module names may differ (e.g. self_attention vs
-# self_attn); unmatched points skip. Refine after inspecting actual module
-# names once the model loads. ln2_in reconstructed by runner; ln1_in fixed
-# (vllm += prev mlp_out) — same quirks as Qwen3 if vllm uses fused AddRMSNorm.
+# HookSpec for GLM-5.1 (GlmMoeDsaForCausalLM). Module boundaries + MLA
+# sub-module hooks for drilling into attention divergence.
+# GLM-5.1 MLA: q_a_proj → q_a_layernorm → q_b_proj (Q compression)
+#              kv_a_proj_with_mqa → kv_a_layernorm → kv_b_proj (KV compression)
+#              indexer (GLM-specific GlmMoeDsaIndexer)
+#              o_proj
+# The indexer is GLM-specific (not in standard DeepSeek-V2 MLA) — likely
+# divergence point between transformers and vllm-ascend.
 
 architecture: glm
 num_layers_from: config.num_hidden_layers
 
 hook_points:
+  # --- 模块边界 ---
   - {id: "layers.{L}.ln1_in",   module: "model.layers.{L}.input_layernorm",          capture: input,  replicated: true}
   - {id: "layers.{L}.attn_out", module: "model.layers.{L}.self_attn",                capture: output, replicated: true}
   - {id: "layers.{L}.mlp_out",  module: "model.layers.{L}.mlp",                      capture: output, replicated: true}
   - {id: "final_norm",          module: "model.norm",                                capture: output, replicated: true}
   - {id: "logits",              module: "lm_head",                                   capture: output, replicated: true}
+
+  # --- MLA Q 路径 ---
+  - {id: "layers.{L}.q_a_proj.out",      module: "model.layers.{L}.self_attn.q_a_proj",           capture: output, replicated: false}
+  - {id: "layers.{L}.q_a_layernorm.out", module: "model.layers.{L}.self_attn.q_a_layernorm",      capture: output, replicated: true}
+  - {id: "layers.{L}.q_b_proj.out",      module: "model.layers.{L}.self_attn.q_b_proj",           capture: output, replicated: false}
+
+  # --- MLA KV 路径 ---
+  - {id: "layers.{L}.kv_a_proj.out",     module: "model.layers.{L}.self_attn.kv_a_proj_with_mqa", capture: output, replicated: true}
+  - {id: "layers.{L}.kv_a_layernorm.out",module: "model.layers.{L}.self_attn.kv_a_layernorm",     capture: output, replicated: true}
+  - {id: "layers.{L}.kv_b_proj.out",     module: "model.layers.{L}.self_attn.kv_b_proj",          capture: output, replicated: false}
+
+  # --- o_proj (attention output) ---
+  - {id: "layers.{L}.o_proj.in",         module: "model.layers.{L}.self_attn.o_proj",             capture: input,  replicated: false}
+  - {id: "layers.{L}.o_proj.out",        module: "model.layers.{L}.self_attn.o_proj",             capture: output, replicated: true}
 
 overrides: {}
