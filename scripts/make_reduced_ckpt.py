@@ -44,14 +44,15 @@ def main():
     cfg["num_hidden_layers"] = n
     json.dump(cfg, open(os.path.join(dst, "config.json"), "w"))
     for f in os.listdir(src):
-        if f.endswith(".safetensors") or f == "model.safetensors.index.json":
+        if f.endswith(".safetensors") or f.endswith(".index.json"):
             continue
         d = os.path.join(dst, f)
         if not os.path.exists(d):
             os.symlink(os.path.join(src, f), d)
 
-    # filter weights: keep layers 0..N-1 + non-layer
-    index = json.load(open(os.path.join(src, "model.safetensors.index.json")))
+    # auto-detect the safetensors index file (W8A8 uses quant_model_weights.safetensors.index.json)
+    idx_name = next(f for f in os.listdir(src) if f.endswith(".index.json"))
+    index = json.load(open(os.path.join(src, idx_name)))
     wm = index["weight_map"]
     keep = {w: sh for w, sh in wm.items() if layer_index(w) < n}
     proc = sorted(set(keep.values()))
@@ -73,7 +74,7 @@ def main():
             print(f"[{i+1}/{len(proc)}] {sh}: {len(tensors)} tensors", flush=True)
 
     json.dump({"metadata": {"total_size": total}, "weight_map": new_wm},
-              open(os.path.join(dst, "model.safetensors.index.json"), "w"))
+              open(os.path.join(dst, idx_name), "w"))
     print(f"DONE reduced ckpt at {dst} | {len(new_wm)} weights | {total/1e9:.1f}GB", flush=True)
 
 
