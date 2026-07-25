@@ -187,24 +187,29 @@ class VllmAscendBackend(InferenceBackend):
     def run_forced_decode(self, prompt: str, ref_tokens) -> list:
         """Run prefill + forced decode following ``ref_tokens`` (token ids).
 
-        Returns the generated RequestOutputs. The caller registers hooks with a
-        stage_provider that derives the decode step from forward_context.
+        vllm V1 does NOT support SamplingParams.logits_processors (the old
+        callable list is ignored by the V1 sampler). Instead, do multiple
+        generate() calls with max_tokens=1, extending the prompt with ref_tokens
+        one at a time. Prefix caching reuses the KV cache, so only the new
+        token is computed. Each call does 1 prefill (cached) + 1 decode forward.
         """
-        from vllm import SamplingParams
+        from vllm import SamplingParams, TokensPrompt
         ref = list(ref_tokens)
+        sp = SamplingParams(temperature=0.0, max_tokens=1)
+        # Get prompt token IDs
+        if isinstance(prompt, dict):  # TokensPrompt
+            prompt_ids = list(prompt["prompt_token_ids"])
+        else:
+            prompt_ids = self._tokenizer(prompt).input_ids if self._tokenizer else []
 
-        def _force(logits_processor, token_ids, logits):
-            # Force the next token to the reference token at this step.
-            step = len(token_ids) - self._prefill_len
-            if 0 <= step < len(ref):
-                forced = ref[step]
-                logits[:] = float("-inf")
-                logits[forced] = 0.0
-
-        sp = SamplingParams(temperature=0.0, max_tokens=len(ref))
-        sp.logits_processors = [_force]
-        self._prefill_len = len(self._tokenizer(prompt).input_ids) if self._tokenizer else 0
-        return self._llm.generate([prompt], sp)
+        results = []
+        accumulated = list(prompt_ids)
+        for i, tok in enumerate(ref):
+            accumulated.append(int(tok))
+            tp = TokensPrompt(prompt_token_ids=accumulated)
+            out = self._llm.generate([tp], sp)
+            results.append(out[0])
+        return results
 
     # ------------------------------------------------------------------
 
@@ -249,16 +254,8 @@ class VllmAscendBackend(InferenceBackend):
             if not ref_tokens:
                 raise ValueError("decode requires ref_tokens")
             input_ids = self.encode(prompt)
-            prompt_len = int(input_ids.shape[-1])
-            ref = [int(t) for t in ref_tokens]
-            forcer = functools.partial(worker_stash.w_force, ref=ref, prompt_len=prompt_len)
-            from vllm import SamplingParams
-            # max_tokens = len(ref)+1 so every ref token is fed back as a decode
-            # forward (the +1th token is sampled freely). This yields N decode
-            # forwards processing ref[0..N-1], aligned with the HF decode loop.
-            sp = SamplingParams(temperature=0.0, max_tokens=len(ref) + 1)
-            sp.logits_processors = [forcer]
-            self._llm.generate([self._decode_prompt(input_ids)], sp)
+            prompt = self._decode_prompt(input_ids)
+            self.run_forced_decode(prompt, ref_tokens)
         else:
             raise ValueError(f"unknown phase: {phase}")
 
