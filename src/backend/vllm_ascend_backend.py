@@ -20,6 +20,7 @@ in models/<model>.yaml) before this process starts. The version string is
 recorded in the dump dir name and config snapshot for cross-version compare.
 """
 
+import os
 from typing import Any, Optional, Tuple
 
 import torch
@@ -57,6 +58,30 @@ class VllmAscendBackend(InferenceBackend):
 
     def load_model(self, config: dict):
         from vllm import LLM
+
+        # Ensure vllm-ascend's custom op library (libcust_opapi.so, which
+        # contains aclnnAddRmsNormBias and other custom fused ops) is in the
+        # dynamic library path. Without this, vllm-ascend falls back to
+        # searching libopapi.so (CANN built-in) and fails with "aclnnXxx not
+        # in libopapi.so". The custom .so exists but its path isn't in the
+        # default LD_LIBRARY_PATH on some images (e.g. 0.20.2).
+        try:
+            import vllm_ascend as _va
+            _base = os.path.join(os.path.dirname(_va.__file__),
+                                 "_cann_ops_custom", "vendors", "custom_transformer")
+            _paths = [
+                os.path.join(_base, "op_api/lib"),
+                os.path.join(_base, "op_proto/lib/linux/aarch64"),
+                os.path.join(_base, "op_impl/ai_core/tbe/op_tiling/lib/linux/aarch64"),
+                os.path.join(_base, "op_impl/cpu/aicpu_kernel/impl"),
+            ]
+            _existing = os.environ.get("LD_LIBRARY_PATH", "")
+            for _p in _paths:
+                if os.path.isdir(_p) and _p not in _existing:
+                    _existing = (_existing + ":" + _p) if _existing else _p
+            os.environ["LD_LIBRARY_PATH"] = _existing
+        except Exception:
+            pass
 
         model_path = config["hf_model_path"]
         dtype = _DTYPE_MAP.get(config.get("dtype", "bfloat16"), "bfloat16")
