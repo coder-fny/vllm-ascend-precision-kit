@@ -22,6 +22,9 @@ hook_points:
   - {id: "layers.{L}.q_a_proj.out",      module: "model.layers.{L}.self_attn.q_a_proj",           capture: output, replicated: false}
   - {id: "layers.{L}.q_a_layernorm.out", module: "model.layers.{L}.self_attn.q_a_layernorm",      capture: output, replicated: true}
   - {id: "layers.{L}.q_b_proj.out",      module: "model.layers.{L}.self_attn.q_b_proj",           capture: output, replicated: false}
+  # vllm DeepseekV2MLAAttention uses fused_qkv_a_proj (fused Q+KV) instead of
+  # separate q_a_proj. Add it as a vllm-only hook to capture the fused output.
+  - {id: "layers.{L}.fused_qkv_a_proj.out", module: "model.layers.{L}.self_attn.fused_qkv_a_proj", capture: output, replicated: false}
 
   # --- MLA KV 路径 ---
   - {id: "layers.{L}.kv_a_proj.out",     module: "model.layers.{L}.self_attn.kv_a_proj_with_mqa", capture: output, replicated: true}
