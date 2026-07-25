@@ -115,13 +115,15 @@ def _w_incr_step(module, args, kwargs):
     candidates = list(args if isinstance(args, tuple) else ())
     if isinstance(kwargs, dict):
         candidates.extend(kwargs.values())
-    # Find the tensor with the smallest first dim (likely input_ids/hidden_states)
+    # Debug: print all tensor shapes (first 5)
+    dbg = [f"{list(v.shape)}" for v in candidates if isinstance(v, torch.Tensor)][:5]
+    print(f"[step_hook] tensors: {dbg} prompt_len={_PROMPT_LEN[0]}", flush=True)
+    # Find input_ids: 1D or 2D integer tensor with small first dim
     best = None
     best_len = None
     for v in candidates:
         if isinstance(v, torch.Tensor) and v.dim() >= 1:
             sl = v.shape[0]
-            # Prefer tensors with small first dim (input_ids, not weights)
             if best_len is None or sl < best_len:
                 best = v
                 best_len = sl
