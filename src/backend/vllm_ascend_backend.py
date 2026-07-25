@@ -41,6 +41,8 @@ class VllmAscendBackend(InferenceBackend):
         self._model = None
         self._tokenizer = None
         self._config = None
+        self._reduced_dir = None      # auto-generated reduced-layer dir (cleaned in finalize)
+        self._messages = None
 
     @property
     def name(self) -> str:
@@ -62,6 +64,13 @@ class VllmAscendBackend(InferenceBackend):
         tp = int(config.get("tp_size", 1))
         quant = config.get("quantization_config")
         trc = config.get("trust_remote_code", True)
+        nlo = config.get("num_layers_override")
+        max_model_len = config.get("max_model_len")
+        self._messages = config.get("messages")
+
+        if nlo:
+            model_path = self._make_reduced_dir(model_path, int(nlo))
+            print(f"[vllm-ascend] num_layers_override={nlo} -> reduced dir {model_path}")
 
         kwargs = dict(
             model=model_path,
@@ -73,12 +82,38 @@ class VllmAscendBackend(InferenceBackend):
         if quant:
             # vllm quantization name (e.g. 'ascendw8a8') or a QuantConfig
             kwargs["quantization"] = quant if isinstance(quant, str) else None
+        if max_model_len:
+            kwargs["max_model_len"] = int(max_model_len)
 
         self._llm = LLM(**kwargs)
         self._config = self._llm.llm_engine.model_config.hf_config
         self._model = self._get_model_inplace()
         print(f"[vllm-ascend] loaded {model_path} dtype={dtype} enforce_eager={enforce_eager} "
-              f"tp={tp} quant={quant} layers={self.get_num_layers()}")
+              f"tp={tp} quant={quant} max_model_len={max_model_len} layers={self.get_num_layers()}")
+
+    def _make_reduced_dir(self, src: str, n: int) -> str:
+        """Auto-generate a reduced-layer model dir: copy config.json with
+        num_hidden_layers=n, symlink everything else (weights/tokenizer). vllm
+        loads the first n layers' weights; the rest in the checkpoint are
+        ignored (unmatched). Lets huge MoE models fit for pipeline testing."""
+        import json
+        import os
+        import tempfile
+        d = tempfile.mkdtemp(prefix=f"reduced_{n}l_")
+        with open(os.path.join(src, "config.json")) as f:
+            cfg = json.load(f)
+        cfg["num_hidden_layers"] = n
+        with open(os.path.join(d, "config.json"), "w") as f:
+            json.dump(cfg, f)
+        for fn in os.listdir(src):
+            if fn == "config.json":
+                continue
+            try:
+                os.symlink(os.path.join(src, fn), os.path.join(d, fn))
+            except Exception:
+                pass
+        self._reduced_dir = d
+        return d
 
     def _get_model_inplace(self) -> Optional[nn.Module]:
         """Access the underlying nn.Module in-process (v0 / single-process path).
@@ -156,6 +191,12 @@ class VllmAscendBackend(InferenceBackend):
                 from transformers import AutoTokenizer
                 self._tokenizer = AutoTokenizer.from_pretrained(
                     self._llm.llm_engine.model_config.model, trust_remote_code=True)
+        if self._messages:
+            # Chat input: apply chat template (add_generation_prompt) so the
+            # dump matches a /v1/chat/completions request.
+            return self._tokenizer.apply_chat_template(
+                self._messages, add_generation_prompt=True, tokenize=True,
+                return_tensors="pt").input_ids
         return self._tokenizer(prompt, return_tensors="pt").input_ids
 
     def run_dump(self, spec, dump_mgr, phase: str, prompt: str, ref_tokens=None):
@@ -200,49 +241,55 @@ class VllmAscendBackend(InferenceBackend):
         stashes = self._llm.apply_model(worker_stash.w_get)
         # 4. merge into the main-process dump_mgr (all stages: prefill + decode/step_*)
         self._merge_stashes(stashes, spec, dump_mgr, phase)
-        # 5. logits recompute from final_norm (prefill only; per-step decode
-        #    logits recompute is TODO).
-        if phase == "prefill":
-            self._capture_logits(dump_mgr, phase)
+        # 5. logits recompute from final_norm for every captured stage
+        #    (prefill + decode/step_*).
+        self._capture_logits(dump_mgr, phase)
 
     def _capture_logits(self, dump_mgr, phase):
+        """Recompute logits = lm_head(final_norm) for EVERY captured stage
+        (prefill + decode/step_*) via apply_model. vllm V1 doesn't compute full
+        logits via lm_head.forward (only for sampled tokens), so derive them from
+        the captured final_norm. TP>1: lm_head is vocab-parallel -> concat shards.
+        """
         import functools
         import torch
         from .. import worker_stash
-        fn = dump_mgr.get_tensor(phase, "final_norm")
-        if fn is None:
-            print("[vllm-ascend] logits capture skipped: no final_norm")
-            return
-        outs = self._llm.apply_model(functools.partial(worker_stash.w_logits, final_norm=fn))
-        outs = [o for o in outs if o is not None]
-        if not outs:
-            print("[vllm-ascend] logits capture: no output from workers")
-            return
         vsize = getattr(self._config, "vocab_size", None)
-        if len(outs) == 1:
-            logits = outs[0]
-        elif vsize is not None and outs[0].shape[-1] == vsize:
-            # logits_processor returned full logits (replicated across ranks)
-            logits = outs[0]
-        else:
-            # lm_head is vocab-parallel -> concat shards along vocab dim
-            try:
-                logits = torch.cat(outs, dim=-1)
-            except Exception:
-                logits = outs[0]
-        dump_mgr.add(phase, "logits", logits)
-        print(f"[vllm-ascend] captured logits via apply_model: shape={list(logits.shape)}")
+        n = 0
+        for stage in dump_mgr.stages():
+            fn = dump_mgr.get_tensor(stage, "final_norm")
+            if fn is None:
+                continue
+            outs = self._llm.apply_model(
+                functools.partial(worker_stash.w_logits, final_norm=fn))
+            outs = [o for o in outs if o is not None]
+            if not outs:
+                continue
+            if len(outs) == 1 or (vsize is not None and outs[0].shape[-1] == vsize):
+                logits = outs[0]            # full (logits_processor) or TP=1
+            else:
+                try:                        # vocab-parallel shards -> concat
+                    logits = torch.cat(outs, dim=-1)
+                except Exception:
+                    logits = outs[0]
+            dump_mgr.add(stage, "logits", logits)
+            n += 1
+        if n:
+            print(f"[vllm-ascend] captured logits for {n} stage(s) via apply_model")
 
     def _merge_stashes(self, stashes, spec, dump_mgr, phase):
-        """Merge per-worker stashes into dump_mgr.
+        """Merge per-worker stashes into dump_mgr (all stages).
 
-        TP=1: single stash, take as-is. TP>1: replicated tensors (layernorms,
-        all-reduced outputs) take rank0; sharded tensors concat along hidden.
-        NOTE: the spec's `replicated` flag is a coarse guide — for vllm TP the
-        all-reduced outputs (attn_out/o_proj.out/mlp_out/down_proj.out) are full
-        too; TP>1 gather needs per-op sharding knowledge (phase 2). TP=1 is the
-        verified path.
+        TP=1: single stash, take as-is. TP>1: AUTO-DETECT whether each tensor is
+        replicated or sharded. All-reduced outputs (attn_out/mlp_out/o_proj.out/
+        down_proj.out, layernorms) are bit-identical across TP ranks (all-reduce
+        broadcasts the same result) -> take rank0. Column/row-parallel shards
+        (q/k/v/gate/up_proj.out, o/down_proj.in) differ across ranks -> concat
+        along the hidden dim. This is more robust than the manual `replicated`
+        flag, which can be wrong for vllm TP.
         """
+        import torch
+        from ..parallel_merge import normalize_tensor
         if not stashes:
             return
         if len(stashes) == 1:
@@ -250,7 +297,6 @@ class VllmAscendBackend(InferenceBackend):
                 for name, t in named.items():
                     dump_mgr.add(stage, name, t)
             return
-        replicated = {p.id for p in spec.hook_points if p.replicated}
         pairs = set()
         for s in stashes:
             for stage, named in s.items():
@@ -261,12 +307,20 @@ class VllmAscendBackend(InferenceBackend):
             parts = [p for p in parts if p is not None]
             if not parts:
                 continue
-            if name in replicated:
+            if len(parts) == 1:
+                dump_mgr.add(stage, name, parts[0])
+                continue
+            # Replicated tensors are (near-)identical across ranks (tolerant of
+            # tiny bf16 all-reduce ordering diffs); sharded tensors differ a lot.
+            base = parts[0].float()
+            is_replicated = all(
+                torch.allclose(base, p.float(), atol=1e-3, rtol=1e-3)
+                for p in parts[1:])
+            if is_replicated:
                 dump_mgr.add(stage, name, parts[0])
             else:
                 try:
-                    from ..parallel_merge import normalize_tensor
-                    full = __import__("torch").cat([normalize_tensor(p) for p in parts], dim=-1)
+                    full = torch.cat([normalize_tensor(p) for p in parts], dim=-1)
                 except Exception:
                     full = parts[0]
                 dump_mgr.add(stage, name, full)
@@ -295,3 +349,11 @@ class VllmAscendBackend(InferenceBackend):
             self._model = None
         except Exception:
             pass
+        # Clean up the auto-generated reduced-layer dir (symlinks + config).
+        if self._reduced_dir:
+            try:
+                import shutil
+                shutil.rmtree(self._reduced_dir, ignore_errors=True)
+            except Exception:
+                pass
+            self._reduced_dir = None
