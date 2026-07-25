@@ -51,18 +51,19 @@ class HookRegistry:
         return self.stage_provider() if self.stage_provider else self.current_stage
 
     def _make_input_pre_hook(self, point_id: str):
-        """forward_pre_hook: capture the residual stream.
+        """forward_pre_hook: capture the residual stream (true input to the norm).
 
         vllm fused AddRMSNorm is called as ``norm(hidden_delta, residual)`` —
-        the true running residual is ``args[1]`` (args[0] is the per-layer
-        delta). HF calls ``norm(residual)`` (single arg), and plain modules
-        like o_proj take a single input. So capture ``args[1]`` when present,
-        else ``args[0]``.
+        the true input to the norm is ``args[0] + args[1]`` (new residual =
+        delta + old residual). HF calls ``norm(residual)`` (single arg), where
+        args[0] IS the residual. So:
+        - 1 arg: capture args[0] (HF non-fused, or plain module input)
+        - 2 args: capture args[0] + args[1] (vllm fused: the true residual)
         """
 
         def hook(module, args):
-            if isinstance(args, tuple) and len(args) >= 2 and isinstance(args[1], torch.Tensor):
-                a = args[1]            # vllm fused-norm residual arg
+            if isinstance(args, tuple) and len(args) >= 2 and isinstance(args[0], torch.Tensor) and isinstance(args[1], torch.Tensor):
+                a = (args[0].detach() + args[1].detach())  # vllm fused: true residual = delta + old_residual
             elif isinstance(args, tuple) and args:
                 a = args[0]            # HF single-arg norm, or o_proj/down_proj input
             else:
