@@ -19,11 +19,11 @@ precision:
   dp_size: 1
   max_model_len: 4096
 
-# vllm-ascend side: reduced W8A8 checkpoint (already 20 layers, ascend quant)
+# vllm-ascend side: reduced bf16 checkpoint (20 layers, no quantization) — bf vs bf comparison
 sides:
   vllm_ascend:
-    hf_model_path: /data/glm51_w8a8_20l
-    quantization_config: ascend
+    hf_model_path: /a3_inference/itask/workdir/models/glm51_20l_ckpt
+    quantization_config: null
 
 hook_spec: models/hooks/glm.yaml
 
