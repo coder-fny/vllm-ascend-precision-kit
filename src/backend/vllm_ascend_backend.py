@@ -187,13 +187,16 @@ class VllmAscendBackend(InferenceBackend):
     def run_forced_decode(self, prompt: str, ref_tokens) -> list:
         """Run prefill + forced decode following ``ref_tokens`` (token ids).
 
-        vllm V1 does NOT support SamplingParams.logits_processors (the old
-        callable list is ignored by the V1 sampler). Instead, do multiple
-        generate() calls with max_tokens=1, extending the prompt with ref_tokens
-        one at a time. Prefix caching reuses the KV cache, so only the new
-        token is computed. Each call does 1 prefill (cached) + 1 decode forward.
+        vllm V1 does NOT support SamplingParams.logits_processors. Instead,
+        do multiple generate(prompt + ref[:i+1], max_tokens=1) calls. Prefix
+        caching reuses the KV cache. Each extended prefill's last token processes
+        ref_tokens[i] with the cached KV — numerically equivalent to a decode step.
+
+        The stage hook detects extended prefills (seq_len > prompt_len) and tags
+        them as decode/step_{seq_len - prompt_len - 1}.
         """
         from vllm import SamplingParams, TokensPrompt
+        from .. import worker_stash
         ref = list(ref_tokens)
         sp = SamplingParams(temperature=0.0, max_tokens=1)
         # Get prompt token IDs
@@ -201,6 +204,7 @@ class VllmAscendBackend(InferenceBackend):
             prompt_ids = list(prompt["prompt_token_ids"])
         else:
             prompt_ids = self._tokenizer(prompt).input_ids if self._tokenizer else []
+        worker_stash.set_prompt_len(len(prompt_ids))
 
         results = []
         accumulated = list(prompt_ids)

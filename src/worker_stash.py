@@ -17,6 +17,7 @@ _STASH: dict = {}          # {stage: {name: cpu_tensor}}
 _STAGE: list = ["prefill"]
 _STEP: list = [0]          # forward counter (legacy, not used for stage)
 _DECODE_COUNT: list = [0]  # decode step counter (reset on each prefill)
+_PROMPT_LEN: list = [0]    # original prompt length (for extended-prefill decode detection)
 
 
 def reset():
@@ -37,33 +38,55 @@ def incr_step() -> int:
     return _STEP[0]
 
 
+def set_prompt_len(n):
+    _PROMPT_LEN[0] = n
+
+
 def set_stage_by_input(tensor):
     """Determine the dump stage from the input tensor shape.
 
-    vllm V1 passes input_ids (1D: [num_tokens]) to the model forward.
-    - num_tokens > 1 → "prefill" (profiling/warmup with dummy tokens also >1
-      but will be overwritten by the real prefill)
-    - num_tokens == 1 → "decode/step_{decode_count}" (0-indexed)
+    Two modes:
+    1. True decode (seq_len == 1): standard vllm decode forward.
+    2. Extended prefill (seq_len > prompt_len): vllm V1 forced decode via
+       multiple generate(prompt + ref[:i+1], max_tokens=1). The extended
+       prefill's last token processes ref_tokens[i] with the cached KV from
+       the prefix — numerically equivalent to a decode step.
     """
     import torch
     if not isinstance(tensor, torch.Tensor) or tensor.dim() < 1:
         return
     seq_len = tensor.shape[0]
-    if seq_len > 1:
+    plen = _PROMPT_LEN[0]
+    if plen > 0 and seq_len > plen:
+        # Extended prefill: last token is the decode step
+        step = seq_len - plen - 1
+        _STAGE[0] = f"decode/step_{step}"
+    elif seq_len > 1:
+        # Original prefill
         _STAGE[0] = "prefill"
-        _DECODE_COUNT[0] = 0  # reset decode counter for new prefill
+        _DECODE_COUNT[0] = 0
     elif seq_len == 1:
+        # True decode forward
         n = _DECODE_COUNT[0]
         _DECODE_COUNT[0] += 1
         _STAGE[0] = f"decode/step_{n}"
 
 
 def add(stage: str, name: str, tensor):
-    """Stash a captured tensor (moved to CPU, cloned). Worker-side."""
+    """Stash a captured tensor (moved to CPU, cloned). Worker-side.
+
+    For extended-prefill decode steps (stage starts with 'decode/step_'),
+    only keep the LAST token's activations — the prefix tokens are from
+    the cached KV and not relevant to the decode comparison.
+    """
     import torch
     if not isinstance(tensor, torch.Tensor):
         return
-    _STASH.setdefault(stage, {})[name] = tensor.detach().cpu().clone()
+    t = tensor.detach().cpu().clone()
+    # For extended-prefill decode: extract only the last token
+    if stage.startswith("decode/step_") and t.dim() >= 2 and t.shape[0] > 1:
+        t = t[-1:]  # keep only last token: [1, hidden]
+    _STASH.setdefault(stage, {})[name] = t
 
 
 def get() -> dict:
