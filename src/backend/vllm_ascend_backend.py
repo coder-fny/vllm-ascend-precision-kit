@@ -197,6 +197,7 @@ class VllmAscendBackend(InferenceBackend):
         """
         from vllm import SamplingParams, TokensPrompt
         from .. import worker_stash
+        import functools
         ref = list(ref_tokens)
         sp = SamplingParams(temperature=0.0, max_tokens=1)
         # Get prompt token IDs
@@ -204,7 +205,8 @@ class VllmAscendBackend(InferenceBackend):
             prompt_ids = list(prompt["prompt_token_ids"])
         else:
             prompt_ids = self._tokenizer(prompt).input_ids if self._tokenizer else []
-        worker_stash.set_prompt_len(len(prompt_ids))
+        # Set prompt_len in each worker (via apply_model — workers are separate processes)
+        self._llm.apply_model(functools.partial(worker_stash.w_set_prompt_len, prompt_len=len(prompt_ids)))
 
         results = []
         accumulated = list(prompt_ids)

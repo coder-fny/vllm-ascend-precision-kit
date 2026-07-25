@@ -105,6 +105,11 @@ def w_reset(m):
     reset()
 
 
+def w_set_prompt_len(m, prompt_len):
+    """Set _PROMPT_LEN in each worker (for extended-prefill decode detection)."""
+    _PROMPT_LEN[0] = prompt_len
+
+
 def _w_incr_step(module, args, kwargs):
     """Top-level forward_pre_hook (with_kwargs=True): detect prefill vs decode
     from input shape. vllm V1 passes model inputs as kwargs (model(**inputs)),
