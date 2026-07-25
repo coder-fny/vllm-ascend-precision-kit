@@ -88,17 +88,23 @@ def w_reset(m):
     reset()
 
 
-def _w_incr_step(module, args):
-    """Top-level forward_pre_hook: detect prefill vs decode from input shape
-    and set the stage. This is more robust than a counter (vllm V1 does
-    profiling/dummy forwards that mess up counting). Picklable (top-level)."""
-    # Extract hidden_states from args (first tensor arg)
+def _w_incr_step(module, args, kwargs):
+    """Top-level forward_pre_hook (with_kwargs=True): detect prefill vs decode
+    from input shape. vllm V1 may pass inputs as kwargs (model(**inputs)),
+    so check both args and kwargs for a tensor with seq_len info."""
     import torch
-    a = args[0] if isinstance(args, tuple) and args else args
-    if isinstance(a, torch.Tensor):
-        set_stage_by_input(a)
-    else:
-        incr_step()  # fallback to counter
+    # Try args first
+    for a in (args if isinstance(args, tuple) else ()):
+        if isinstance(a, torch.Tensor) and a.dim() >= 2:
+            set_stage_by_input(a)
+            return
+    # Try kwargs (vllm V1 passes inputs as kwargs)
+    for v in (kwargs.values() if isinstance(kwargs, dict) else ()):
+        if isinstance(v, torch.Tensor) and v.dim() >= 2:
+            set_stage_by_input(v)
+            return
+    # Fallback: increment counter (can't determine stage from shape)
+    incr_step()
 
 
 def w_register(m, spec, phase):
@@ -113,7 +119,7 @@ def w_register(m, spec, phase):
     reg.register()
     # Counter hook on the top-level model (fires before sub-module hooks).
     try:
-        m.register_forward_pre_hook(_w_incr_step)
+        m.register_forward_pre_hook(_w_incr_step, with_kwargs=True)
     except Exception:
         pass
 
