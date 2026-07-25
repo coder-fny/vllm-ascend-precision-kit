@@ -71,8 +71,21 @@ class TransformersBackend(InferenceBackend):
         try:
             import accelerate  # noqa: F401
             kwargs["device_map"] = "auto"
+            # Cap per-device memory so device_map balances evenly. MoE layers are
+            # large + indivisible; without a cap it can stack several on one card
+            # and OOM. Leave ~15GB headroom for activations/overhead.
+            try:
+                ndev = torch.npu.device_count() if hasattr(torch, "npu") else 1
+                kwargs["max_memory"] = {i: "46GiB" for i in range(ndev)}
+            except Exception:
+                pass
+            # MoE models with device_map offload weights to disk and require an
+            # offload_folder to re-save them (accelerate quirk). Provide one.
+            import tempfile
+            offload = tempfile.mkdtemp(prefix="hf_offload_")
+            kwargs["offload_folder"] = offload
             self._model = AutoModelForCausalLM.from_pretrained(model_path, **kwargs)
-            print("[transformers] using device_map='auto' (multi-card shard)")
+            print("[transformers] using device_map='auto' (multi-card shard, max_memory=46GiB/card)")
         except ImportError:
             dev_id = int(str(os.environ.get("ASCEND_DEVICE_ID", "0")).split(",")[0])
             self._device = f"npu:{dev_id}"
