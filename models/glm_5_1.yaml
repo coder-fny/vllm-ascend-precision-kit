@@ -1,12 +1,11 @@
-# GLM-5.1-bf16 (GlmMoeDsaForCausalLM, 78 layers, ~1.4TB) — too big for 16x910A3.
-# Reduced to 20 layers via num_layers_override (auto reduced-dir for vllm,
-# config override for transformers). TP=16, max_model_len=4096 to fit.
-# vllm-ascend only here (transformers reference TBD — GLM arch + 1.4TB).
+# GLM-5.1 — option A: vllm-ascend W8A8 quantized (reduced 20-layer ckpt) vs
+# transformers bf16 reference (num_layers_override=20 from original 1.4TB).
+# W8A8 avoids aclnnAddRmsNormBias (uses npu_add_rms_norm_quant).
 # Pod: vllm0202 (vllm-ascend 0.20.2, VLLM_VERSION=0.20.2).
 
 model:
   name: GLM-5.1
-  hf_model_path: /a3_inference/itask/workdir/models/GLM-5.1-bf16
+  hf_model_path: /a3_inference/itask/workdir/models/GLM-5.1-bf16   # bf16 original (transformers reference)
   architecture: glm
   trust_remote_code: true
   num_layers_override: 20
@@ -19,6 +18,12 @@ precision:
   tp_size: 16
   dp_size: 1
   max_model_len: 4096
+
+# vllm-ascend side: reduced W8A8 checkpoint (already 20 layers, ascend quant)
+sides:
+  vllm_ascend:
+    hf_model_path: /data/glm51_w8a8_20l
+    quantization_config: ascend
 
 hook_spec: models/hooks/glm.yaml
 
