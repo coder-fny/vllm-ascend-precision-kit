@@ -109,7 +109,7 @@ def w_register(m, spec, phase):
     """
     from .hooks import HookRegistry
     reg = HookRegistry(m, spec, add, phase)
-    reg.stage_provider = step_stage
+    reg.stage_provider = stage  # _w_incr_step sets _STAGE via set_stage_by_input
     reg.register()
     # Counter hook on the top-level model (fires before sub-module hooks).
     try:
