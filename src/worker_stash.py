@@ -15,7 +15,8 @@ inside a hook closure resolves to THIS worker's copy of the global.
 
 _STASH: dict = {}          # {stage: {name: cpu_tensor}}
 _STAGE: list = ["prefill"]
-_STEP: list = [0]          # forward counter: 1=prefill, 2+=decode steps
+_STEP: list = [0]          # forward counter (legacy, not used for stage)
+_DECODE_COUNT: list = [0]  # decode step counter (reset on each prefill)
 
 
 def reset():
@@ -36,17 +37,31 @@ def incr_step() -> int:
     return _STEP[0]
 
 
-def step_stage() -> str:
-    """Map the forward counter to a dump stage.
+def set_stage_by_input(hidden_states):
+    """Determine the dump stage from the input tensor shape.
 
-    forward #1 = prefill; forward #2 = decode/step_0; #3 = decode/step_1; ...
-    (vllm prefill + N decode forwards align with HF prefill + N decode steps,
-    both processing ref token i at decode/step_i.)
+    More robust than a counter: vllm V1 does profiling/dummy forwards during
+    engine init that mess up the counter. Instead, detect prefill (seq_len > 1)
+    vs decode (seq_len == 1) from the input, and count decode steps separately.
+
+    - seq_len > 1 → "prefill"
+    - seq_len == 1 → "decode/step_{decode_count}" (0-indexed)
+    - seq_len == 0 or invalid → "unknown" (skip)
     """
-    n = _STEP[0]
-    if n <= 1:
+    if not isinstance(hidden_states, __import__("torch").Tensor):
+        return "unknown"
+    seq_len = hidden_states.shape[0] if hidden_states.dim() <= 2 else hidden_states.shape[1]
+    if seq_len > 1:
+        _STAGE[0] = "prefill"
+        _DECODE_COUNT[0] = 0  # reset decode counter for new prefill
         return "prefill"
-    return f"decode/step_{n - 2}"
+    if seq_len == 1:
+        n = _DECODE_COUNT[0]
+        _DECODE_COUNT[0] += 1
+        stage = f"decode/step_{n}"
+        _STAGE[0] = stage
+        return stage
+    return "unknown"
 
 
 def add(stage: str, name: str, tensor):
@@ -74,10 +89,16 @@ def w_reset(m):
 
 
 def _w_incr_step(module, args):
-    """Top-level forward_pre_hook on the top-level model: bump the forward
-    counter at the start of each forward so boundary hooks (on sub-modules,
-    which fire after) tag the right stage. Picklable (top-level)."""
-    incr_step()
+    """Top-level forward_pre_hook: detect prefill vs decode from input shape
+    and set the stage. This is more robust than a counter (vllm V1 does
+    profiling/dummy forwards that mess up counting). Picklable (top-level)."""
+    # Extract hidden_states from args (first tensor arg)
+    import torch
+    a = args[0] if isinstance(args, tuple) and args else args
+    if isinstance(a, torch.Tensor):
+        set_stage_by_input(a)
+    else:
+        incr_step()  # fallback to counter
 
 
 def w_register(m, spec, phase):
