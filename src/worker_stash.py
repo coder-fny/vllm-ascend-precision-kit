@@ -37,31 +37,25 @@ def incr_step() -> int:
     return _STEP[0]
 
 
-def set_stage_by_input(hidden_states):
+def set_stage_by_input(tensor):
     """Determine the dump stage from the input tensor shape.
 
-    More robust than a counter: vllm V1 does profiling/dummy forwards during
-    engine init that mess up the counter. Instead, detect prefill (seq_len > 1)
-    vs decode (seq_len == 1) from the input, and count decode steps separately.
-
-    - seq_len > 1 → "prefill"
-    - seq_len == 1 → "decode/step_{decode_count}" (0-indexed)
-    - seq_len == 0 or invalid → "unknown" (skip)
+    vllm V1 passes input_ids (1D: [num_tokens]) to the model forward.
+    - num_tokens > 1 → "prefill" (profiling/warmup with dummy tokens also >1
+      but will be overwritten by the real prefill)
+    - num_tokens == 1 → "decode/step_{decode_count}" (0-indexed)
     """
-    if not isinstance(hidden_states, __import__("torch").Tensor):
-        return "unknown"
-    seq_len = hidden_states.shape[0] if hidden_states.dim() <= 2 else hidden_states.shape[1]
+    import torch
+    if not isinstance(tensor, torch.Tensor) or tensor.dim() < 1:
+        return
+    seq_len = tensor.shape[0]
     if seq_len > 1:
         _STAGE[0] = "prefill"
         _DECODE_COUNT[0] = 0  # reset decode counter for new prefill
-        return "prefill"
-    if seq_len == 1:
+    elif seq_len == 1:
         n = _DECODE_COUNT[0]
         _DECODE_COUNT[0] += 1
-        stage = f"decode/step_{n}"
-        _STAGE[0] = stage
-        return stage
-    return "unknown"
+        _STAGE[0] = f"decode/step_{n}"
 
 
 def add(stage: str, name: str, tensor):
@@ -90,21 +84,28 @@ def w_reset(m):
 
 def _w_incr_step(module, args, kwargs):
     """Top-level forward_pre_hook (with_kwargs=True): detect prefill vs decode
-    from input shape. vllm V1 may pass inputs as kwargs (model(**inputs)),
-    so check both args and kwargs for a tensor with seq_len info."""
+    from input shape. vllm V1 passes model inputs as kwargs (model(**inputs)),
+    typically input_ids (1D: [num_tokens]) or hidden_states (2D: [seq, hidden]).
+    Check both args and kwargs for any tensor and use its first dim as seq_len."""
     import torch
-    # Try args first
-    for a in (args if isinstance(args, tuple) else ()):
-        if isinstance(a, torch.Tensor) and a.dim() >= 2:
-            set_stage_by_input(a)
-            return
-    # Try kwargs (vllm V1 passes inputs as kwargs)
-    for v in (kwargs.values() if isinstance(kwargs, dict) else ()):
-        if isinstance(v, torch.Tensor) and v.dim() >= 2:
-            set_stage_by_input(v)
-            return
-    # Fallback: increment counter (can't determine stage from shape)
-    incr_step()
+    # Collect all tensors from args + kwargs
+    candidates = list(args if isinstance(args, tuple) else ())
+    if isinstance(kwargs, dict):
+        candidates.extend(kwargs.values())
+    # Find the tensor with the smallest first dim (likely input_ids/hidden_states)
+    best = None
+    best_len = None
+    for v in candidates:
+        if isinstance(v, torch.Tensor) and v.dim() >= 1:
+            sl = v.shape[0]
+            # Prefer tensors with small first dim (input_ids, not weights)
+            if best_len is None or sl < best_len:
+                best = v
+                best_len = sl
+    if best is not None:
+        set_stage_by_input(best)
+    else:
+        incr_step()  # fallback
 
 
 def w_register(m, spec, phase):
