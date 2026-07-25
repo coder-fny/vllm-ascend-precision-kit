@@ -1,0 +1,57 @@
+# Qwen3-30B-A3B with CHAT-format input (chat-template support test).
+# chat.messages -> both sides apply_chat_template(add_generation_prompt=True)
+# -> same tokenized input -> dumped activations match a /v1/chat/completions request.
+# Selected via --model qwen3_30b_chat
+
+model:
+  name: Qwen3-30B-A3B
+  hf_model_path: /mnt/sfs_turbo/models/Qwen3-30B-A3B
+  architecture: qwen3
+  trust_remote_code: true
+
+precision:
+  dtype: bfloat16
+  attn_implementation: eager
+  enforce_eager: true
+  quantization_config: null
+  tp_size: 2
+  dp_size: 1
+
+hook_spec: models/hooks/qwen3.yaml
+
+# Chat input (replaces the raw `prompt`)
+chat:
+  messages:
+    - role: user
+      content: |
+        人工智能（AI）是计算机科学的一个分支，旨在创建能够执行通常需要人类智能的任务的系统。
+        自20世纪50年代诞生以来，AI经历了多次起伏，如今得益于大数据、强大算力和先进算法，迎来了蓬勃发展。
+        机器学习作为AI的核心，让计算机通过数据学习规律，而不需要显式编程。
+        深度学习更是通过多层神经网络，在图像识别、语音识别和自然语言处理等领域取得了突破性进展。
+        在实际应用中，AI已广泛用于医疗影像诊断、自动驾驶汽车、智能客服、金融风险预测和个性化推荐等场景，极大提升了效率和便利性。
+        然而，AI的快速发展也带来诸多挑战，如数据隐私、算法偏见、就业替代和武器化风险，引发了社会各界的广泛讨论。
+        为了确保AI的安全可控，研究者们提出了可解释AI、联邦学习、对抗训练等技术，政府和国际组织也纷纷制定伦理准则和法律法规。
+        展望未来，AI有望与脑科学、量子计算等前沿领域融合，创造出更强大的通用人工智能，但也必须警惕潜在的超智能风险。
+        我们应当在发展技术的同时，加强人文关怀，确保AI造福全人类。
+        您对以上关于人工智能的论述有何看法？请结合您的知识，给出您对这篇文章的评价、补充或不同意见。
+
+max_new_tokens: 8
+
+vllm:
+  versions:
+    "0.21.1":
+      pythonpath: []
+      env: {}
+
+compare:
+  thresholds:
+    cosine: 0.95
+    abs_mean_rel_diff: 0.05
+    norm_rel_diff: 0.05
+
+output_dir: ./dumped
+
+env:
+  ASCEND_DEVICE_ID: "0,1,2,3"
+  VLLM_VERSION: "0.21.0"
+  VLLM_ALLOW_INSECURE_SERIALIZATION: "1"

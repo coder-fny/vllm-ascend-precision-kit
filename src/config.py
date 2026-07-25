@@ -216,6 +216,29 @@ class UnifiedConfig:
         # is incompatible with the installed transformers (use the built-in arch).
         return bool(self.model_yaml.get("model", {}).get("trust_remote_code", True))
 
+    @property
+    def num_layers_override(self):
+        """Reduce the model to the first N layers (for huge models that don't
+        fit). Both sides load the same reduced model, so the comparison stays
+        valid (tests the architecture's pipeline, not the full model)."""
+        n = self.model_yaml.get("model", {}).get("num_layers_override")
+        return int(n) if n else None
+
+    @property
+    def max_model_len(self):
+        """vllm max_model_len (cap KV cache for huge/reduced models)."""
+        m = self.model_yaml.get("precision", {}).get("max_model_len")
+        return int(m) if m else None
+
+    @property
+    def messages(self):
+        """Chat-format input (list of {role, content}). When set, both sides
+        apply the tokenizer's chat template (add_generation_prompt=True) so the
+        dumped activations correspond to a chat input — matching what a serving
+        endpoint (/v1/chat/completions) would process. Falls back to the raw
+        `prompt` string when absent."""
+        return self.model_yaml.get("chat", {}).get("messages")
+
     # ------------------------------------------------------------------
     # Side-specific overrides (e.g. vllm-ascend loads a quantized model while
     # transformers loads the bf16 reference of the same base).
@@ -289,6 +312,9 @@ class UnifiedConfig:
         args.dp_size = self.dp_size
         args.trust_remote_code = self.trust_remote_code
         args.quantization_config = self.quantization_config
+        args.num_layers_override = getattr(args, "num_layers", None) or self.num_layers_override
+        args.max_model_len = self.max_model_len
+        args.messages = self.messages
         args.compare_thresholds = self.compare_thresholds
         args.vllm_versions = self.vllm_versions
         return args

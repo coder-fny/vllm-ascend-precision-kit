@@ -1,0 +1,45 @@
+# GLM-5.1-bf16 (GlmMoeDsaForCausalLM, 78 layers, ~1.4TB) — too big for 16x910A3.
+# Reduced to 20 layers via num_layers_override (auto reduced-dir for vllm,
+# config override for transformers). TP=16, max_model_len=4096 to fit.
+# vllm-ascend only here (transformers reference TBD — GLM arch + 1.4TB).
+# Pod: vllm0202 (vllm-ascend 0.20.2, VLLM_VERSION=0.20.2).
+
+model:
+  name: GLM-5.1
+  hf_model_path: /a3_inference/itask/workdir/models/GLM-5.1-bf16
+  architecture: glm
+  trust_remote_code: true
+  num_layers_override: 20
+
+precision:
+  dtype: bfloat16
+  attn_implementation: eager
+  enforce_eager: true
+  quantization_config: null
+  tp_size: 16
+  dp_size: 1
+  max_model_len: 4096
+
+hook_spec: models/hooks/glm.yaml
+
+prompt: "Hello, how are you?"
+max_new_tokens: 8
+
+vllm:
+  versions:
+    "0.20.2":
+      pythonpath: []
+      env: {}
+
+compare:
+  thresholds:
+    cosine: 0.95
+    abs_mean_rel_diff: 0.05
+    norm_rel_diff: 0.05
+
+output_dir: ./dumped
+
+env:
+  ASCEND_DEVICE_ID: "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
+  VLLM_VERSION: "0.20.2"
+  VLLM_ALLOW_INSECURE_SERIALIZATION: "1"

@@ -64,6 +64,9 @@ class DumpRunner:
             "tp_size": sc.get("tp_size") or getattr(self.args, "tp_size", None) or self.cfg.tp_size,
             "dp_size": self.cfg.dp_size,
             "trust_remote_code": self.cfg.trust_remote_code,
+            "num_layers_override": getattr(self.args, "num_layers_override", None),
+            "max_model_len": self.cfg.max_model_len,
+            "messages": self.cfg.messages,
         }
 
     def run(self):

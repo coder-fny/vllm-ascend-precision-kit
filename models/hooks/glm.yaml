@@ -1,0 +1,17 @@
+# HookSpec for GLM-5/5.1 (GlmMoeDsaForCausalLM). Minimal — standard decoder
+# module boundaries. GLM module names may differ (e.g. self_attention vs
+# self_attn); unmatched points skip. Refine after inspecting actual module
+# names once the model loads. ln2_in reconstructed by runner; ln1_in fixed
+# (vllm += prev mlp_out) — same quirks as Qwen3 if vllm uses fused AddRMSNorm.
+
+architecture: glm
+num_layers_from: config.num_hidden_layers
+
+hook_points:
+  - {id: "layers.{L}.ln1_in",   module: "model.layers.{L}.input_layernorm",          capture: input,  replicated: true}
+  - {id: "layers.{L}.attn_out", module: "model.layers.{L}.self_attn",                capture: output, replicated: true}
+  - {id: "layers.{L}.mlp_out",  module: "model.layers.{L}.mlp",                      capture: output, replicated: true}
+  - {id: "final_norm",          module: "model.norm",                                capture: output, replicated: true}
+  - {id: "logits",              module: "lm_head",                                   capture: output, replicated: true}
+
+overrides: {}

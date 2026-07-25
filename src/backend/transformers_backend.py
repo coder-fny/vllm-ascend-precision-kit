@@ -28,6 +28,7 @@ class TransformersBackend(InferenceBackend):
         self._model = None
         self._tokenizer = None
         self._config = None
+        self._messages = None
 
     @property
     def name(self) -> str:
@@ -44,6 +45,11 @@ class TransformersBackend(InferenceBackend):
 
         self._config = AutoConfig.from_pretrained(model_path, trust_remote_code=trc)
         self._tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=trc)
+        nlo = config.get("num_layers_override")
+        if nlo:
+            self._config.num_hidden_layers = int(nlo)
+            print(f"[transformers] num_layers_override={nlo} (loading first {nlo} layers)")
+        self._messages = config.get("messages")
 
         try:
             import torch_npu  # noqa: F401  # registers the npu backend
@@ -57,6 +63,8 @@ class TransformersBackend(InferenceBackend):
         )
         if quant_cfg:
             kwargs["quantization_config"] = quant_cfg
+        if nlo:
+            kwargs["config"] = self._config   # use the reduced-layer config
 
         # Adaptive placement: device_map="auto" (shard across NPUs) when
         # accelerate is available; otherwise load to a single NPU card.
@@ -103,6 +111,12 @@ class TransformersBackend(InferenceBackend):
         return out.logits[:, -1:, :], out.past_key_values
 
     def encode(self, prompt: str) -> torch.Tensor:
+        if self._messages:
+            # Chat input: apply the tokenizer's chat template (add_generation_prompt)
+            # so the dumped activations match a /v1/chat/completions request.
+            return self._tokenizer.apply_chat_template(
+                self._messages, add_generation_prompt=True, tokenize=True,
+                return_tensors="pt").input_ids
         return self._tokenizer(prompt, return_tensors="pt").input_ids
 
     def run_dump(self, spec, dump_mgr, phase: str, prompt: str, ref_tokens=None):
