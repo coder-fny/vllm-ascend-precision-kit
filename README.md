@@ -70,10 +70,17 @@ python run_precision_compare.py --mode single-op --op model.layers.5.self_attn.o
 | Qwen3-30B-A3B | Qwen3 MoE | prefill ALL PASS、decode 逐步、TP=2、chat-template ALL PASS、logits cosine 0.998 |
 | DeepSeek-V2-Lite | DeepseekV2 MLA | prefill 91/109（attn_out 真实 MLA 差异 0.92-0.95），logits 0.978 + argmax 一致 |
 | Qwen3-32B-w8a8 | Qwen3 dense | 量化 option A：W8A8 vs bf16，logits 0.987 + argmax 一致 |
+| GLM-5.1（减层 20 层） | GlmMoeDsa (MLA) | bf16 vs bf16：残差 PASS（0.996-0.999），attn_out 部分 FAIL（MLA 实现差异 0.61-0.91），logits 0.862。减层 checkpoint 构造 + 0.20.2 custom op LD_LIBRARY_PATH 修复验证通过 |
 
 ## 环境要求
 
 在已预装 `torch`+`torch_npu`（HCCL）、`transformers`、`vllm`+`vllm-ascend` 的 Ascend NPU 容器内运行。验证 pod：mm-bench-a3（vllm 0.21.1，`VLLM_VERSION=0.21.0`）、vllm0202（vllm 0.20.2，`VLLM_VERSION=0.20.2`，16 卡）。`accelerate` 用于 transformers `device_map="auto"` 多卡。
+
+**0.20.2 镜像需用 `run.sh` 包装脚本**（自动加载 CANN 环境 + 追加 custom op lib 路径到 `LD_LIBRARY_PATH`，否则 `aclnnAddRmsNormBias` 找不到）：
+```bash
+bash run.sh --model glm_5_1 --mode dump --side vllm_ascend --vllm-version 0.20.2 --phase prefill
+```
+`run.sh` 自动检测 vllm-ascend 的 `_cann_ops_custom` 路径并追加 `libcust_opapi.so`（含 `aclnnAddRmsNormBias` 等 custom op）到 `LD_LIBRARY_PATH`。0.21.0 镜像可直接 `python3 run_precision_compare.py ...`。
 
 ## 目录结构
 
