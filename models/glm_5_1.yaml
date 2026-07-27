@@ -5,24 +5,24 @@
 
 model:
   name: GLM-5.1
-  hf_model_path: /a3_inference/itask/workdir/models/GLM-5.1-bf16   # bf16 original (transformers reference)
+  hf_model_path: /a3_inference/itask/workdir/models/GLM-5.1-bf16
   architecture: glm
   trust_remote_code: true
-  num_layers_override: 20
+  num_layers_override: 2
 
 precision:
   dtype: bfloat16
   attn_implementation: eager
   enforce_eager: true
   quantization_config: null
-  tp_size: 16
+  tp_size: 1
   dp_size: 1
   max_model_len: 4096
 
-# vllm-ascend side: reduced bf16 checkpoint (20 layers) — bf vs bf MLA drill-down
+# vllm-ascend side: 2-layer reduced checkpoint, TP=1 (no merge)
 sides:
   vllm_ascend:
-    hf_model_path: /a3_inference/itask/workdir/models/glm51_20l_ckpt
+    hf_model_path: /data/glm51_2l
     quantization_config: null
 
 hook_spec: models/hooks/glm.yaml
@@ -45,6 +45,6 @@ compare:
 output_dir: ./dumped
 
 env:
-  ASCEND_DEVICE_ID: "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15"
+  ASCEND_DEVICE_ID: "0"
   VLLM_VERSION: "0.20.2"
   VLLM_ALLOW_INSECURE_SERIALIZATION: "1"
