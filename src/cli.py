@@ -45,6 +45,10 @@ def _apply_version_env(cfg, version):
     """Apply vllm-ascend version-specific pythonpath/env before importing vllm."""
     if not version:
         return
+    # --vllm-version is the explicit CLI choice of which vllm-ascend compat
+    # branch to use; it takes priority over the yaml env's VLLM_VERSION (which
+    # is just a default). Force-set so users don't need to `export VLLM_VERSION`.
+    os.environ["VLLM_VERSION"] = version
     ver_cfg = cfg.get_vllm_version_config(version)
     for p in ver_cfg.get("pythonpath", []):
         if p and p not in sys.path:
