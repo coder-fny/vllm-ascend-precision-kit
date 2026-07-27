@@ -186,7 +186,8 @@ def _run_compare(args, cfg):
         layernorm_only=layernorm_only,
     )
     title = "Boundary tensors (gathered)" if layernorm_only else "All tensors (gathered)"
-    all_passed = comparator.report_gathered_comparison(results, title=title) and all_passed
+    all_passed = comparator.report_gathered_comparison(results, title=title,
+                                                       label_a=label_a, label_b=label_b) and all_passed
 
     verdict = "ALL CHECKS PASSED" if all_passed else "SOME CHECKS FAILED"
     color = _GREEN if all_passed else _RED

@@ -257,7 +257,8 @@ class PrecisionComparator:
     # Reporting
     # ------------------------------------------------------------------
 
-    def report_gathered_comparison(self, comparisons, title="Gathered Tensor Stats"):
+    def report_gathered_comparison(self, comparisons, title="Gathered Tensor Stats",
+                                   label_a="name_a", label_b="name_b"):
         if not comparisons:
             print(f"\n{_YELLOW}No gathered tensors found for comparison.{_RESET}")
             return True
@@ -267,9 +268,9 @@ class PrecisionComparator:
                      f"(maxAbs/meanAbs abs diff, maxRel sym rel diff).")
         # Dynamic column widths from actual content so columns always align.
         stage_w = max([len(c["stage"]) for c in comparisons] + [len("Stage")])
-        name_w = max([len(c["name_a"]) for c in comparisons] + [len("name_a")])
+        name_w = max([len(c["name_a"]) for c in comparisons] + [len(label_a)])
         lines.append(f"  {'Stage':<{stage_w}s} {'CosSim':>9s} {'maxAbs':>11s} {'meanAbs':>11s} {'maxRel':>9s} "
-                     f"{'Res':>4s}  {'name_a':<{name_w}s} | name_b")
+                     f"{'Res':>4s}  {label_a:<{name_w}s} | {label_b}")
         all_passed = True
         for c in comparisons:
             all_passed = all_passed and c["passed"]
