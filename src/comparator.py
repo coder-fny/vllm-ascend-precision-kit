@@ -42,7 +42,7 @@ def compare_value(a_val: float, b_val: float, rtol: float = 1e-2, atol: float = 
 def load_scalars(result_dir: str) -> Dict[str, Any]:
     path = Path(result_dir) / "rank_0" / "scalars.json"
     if not path.exists():
-        raise FileNotFoundError(f"scalars.json not found at {path}")
+        return {}  # scalars are optional (not all dumps produce them)
     with open(path) as f:
         return json.load(f)
 
