@@ -66,7 +66,7 @@ def rmsnorm(x, w=None):
         y = y * w
     return y
 
-# use HF's q_a_layernorm weight if available, else no weight
+# use input_layernorm weight (6144, acts on ln1_in) — NOT q_a_layernorm (2048, acts on q_a_proj out)
 w = None
 try:
     from safetensors import safe_open
@@ -74,7 +74,7 @@ try:
     cfg_dir = "/a3_inference/itask/workdir/models/GLM-5.1-bf16"
     idx = glob.glob(os.path.join(cfg_dir, "*.index.json"))[0]
     wm = json.load(open(idx))["weight_map"]
-    key = f"model.layers.{layer}.self_attn.q_a_layernorm.weight"
+    key = f"model.layers.{layer}.input_layernorm.weight"
     if key in wm:
         with safe_open(os.path.join(cfg_dir, wm[key]), framework="pt") as f:
             w = f.get_tensor(key).float()
@@ -85,12 +85,14 @@ an = rmsnorm(a2d, w)
 bn = rmsnorm(b2d, w)
 print(f"\ncosine after RMSNorm: {F.cosine_similarity(an.reshape(1,-1), bn.reshape(1,-1)).item():.5f}  (should match q_a_layernorm ~0.9999)")
 
-# capture consistency
+# capture consistency: L1.ln1_in should = L0.mlp_out + L0.ln2_in (post-attn residual)
+# (L1's residual arg = L0's post-attn residual = L0.ln2_in, NOT L0.ln1_in)
 if layer > 0:
-    l0_mlp = flat(vl[f"layers.{layer-1}.mlp_out"])
-    l0_ln1 = flat(vl[f"layers.{layer-1}.ln1_in"])
-    # align lengths
-    s = min(len(b), len(l0_mlp), len(l0_ln1))
-    recon = l0_mlp[:s] + l0_ln1[:s]
-    print(f"\nvllm capture: cosine(L{layer}.ln1_in, L{layer-1}.mlp+L{layer-1}.ln1) = {F.cosine_similarity(b[:s].unsqueeze(0), recon.unsqueeze(0)).item():.5f}")
-    print(f"  max abs diff: {(b[:s]-recon).abs().max().item():.6f}")
+    for side, d in [("vllm", vl), ("HF", hf)]:
+        l0_mlp = flat(d[f"layers.{layer-1}.mlp_out"])
+        l0_ln2 = flat(d[f"layers.{layer-1}.ln2_in"])
+        cur = flat(d[f"layers.{layer}.ln1_in"])
+        s = min(len(cur), len(l0_mlp), len(l0_ln2))
+        recon = l0_mlp[:s] + l0_ln2[:s]
+        print(f"\n{side} capture: cosine(L{layer}.ln1_in, L{layer-1}.mlp+L{layer-1}.ln2_in) = {F.cosine_similarity(cur[:s].unsqueeze(0), recon.unsqueeze(0)).item():.5f}")
+        print(f"  max abs diff: {(cur[:s]-recon).abs().max().item():.6f}")
