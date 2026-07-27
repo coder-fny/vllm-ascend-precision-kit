@@ -373,13 +373,13 @@ def compute_tensor_diff(a: torch.Tensor, b: torch.Tensor) -> Dict[str, float]:
     if a is None or b is None:
         return {"cosine_sim": float("nan"), "max_abs_diff": float("nan"),
                 "mean_abs_diff": float("nan"), "max_rel_diff": float("nan"),
-                "truncated": False}
+                "norm_ratio": float("nan"), "truncated": False}
     a = a.float()
     b = b.float()
     a, b, truncated = align_tensor_shapes(a, b)
     if a.numel() == 0 or b.numel() == 0:
         return {"cosine_sim": 1.0, "max_abs_diff": 0.0, "mean_abs_diff": 0.0,
-                "max_rel_diff": 0.0, "truncated": truncated}
+                "max_rel_diff": 0.0, "norm_ratio": 1.0, "truncated": truncated}
     cos = torch.nn.functional.cosine_similarity(a.reshape(1, -1), b.reshape(1, -1)).item()
     cos = max(-1.0, min(1.0, cos))
     diff = (a - b).abs()
@@ -390,8 +390,15 @@ def compute_tensor_diff(a: torch.Tensor, b: torch.Tensor) -> Dict[str, float]:
     # it is not informative; this single number gauges error vs signal scale.)
     peak = max(a.abs().max().item(), b.abs().max().item(), 1e-12)
     max_rel_diff = max_abs_diff / peak
+    # norm ratio: ||a||/||b|| — catches magnitude divergence that cosine (scale-
+    # invariant) masks. e.g. mlp_out cosine 0.998 but norm_ratio 8x means one
+    # side's output is 8x larger (scale/quantization mismatch), which still
+    # corrupts downstream routing.
+    norm_b = b.norm().item()
+    norm_ratio = a.norm().item() / norm_b if norm_b > 1e-12 else float("inf")
     return {"cosine_sim": cos, "max_abs_diff": max_abs_diff,
             "mean_abs_diff": mean_abs_diff, "max_rel_diff": max_rel_diff,
+            "norm_ratio": norm_ratio,
             "truncated": truncated}
 
 

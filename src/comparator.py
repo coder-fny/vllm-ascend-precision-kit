@@ -211,6 +211,7 @@ class PrecisionComparator:
                     "max_abs_diff": d["max_abs_diff"],
                     "mean_abs_diff": d["mean_abs_diff"],
                     "max_rel_diff": d["max_rel_diff"],
+                    "norm_ratio": d["norm_ratio"],
                     "abs_mean_reldiff": am["rel_diff"],
                     "norm_reldiff": nm["rel_diff"],
                     "passed": cos_ok,
@@ -269,7 +270,7 @@ class PrecisionComparator:
         # Dynamic column widths from actual content so columns always align.
         stage_w = max([len(c["stage"]) for c in comparisons] + [len("Stage")])
         name_w = max([len(c["name_a"]) for c in comparisons] + [len(label_a)])
-        lines.append(f"  {'Stage':<{stage_w}s} {'CosSim':>9s} {'maxAbs':>11s} {'meanAbs':>11s} {'maxRel':>9s} "
+        lines.append(f"  {'Stage':<{stage_w}s} {'CosSim':>9s} {'normR':>7s} {'maxAbs':>11s} {'meanAbs':>11s} {'maxRel':>9s} "
                      f"{'Res':>4s}  {label_a:<{name_w}s} | {label_b}")
         all_passed = True
         for c in comparisons:
@@ -277,10 +278,12 @@ class PrecisionComparator:
             status = f"{_color(c['passed'])}{'PASS' if c['passed'] else 'FAIL'}{_RESET}"
             cos = c["cosine_sim"]
             cos_s = f"{cos:.5f}" if cos == cos else "nan"
+            nr = c.get("norm_ratio", float("nan"))
+            nr_s = f"{nr:.2f}" if nr == nr and nr != float("inf") else "inf"
             maxa = c.get("max_abs_diff", float("nan"))
             meana = c.get("mean_abs_diff", float("nan"))
             maxr = c.get("max_rel_diff", float("nan"))
-            lines.append(f"  {c['stage']:<{stage_w}s} {cos_s:>9s} {maxa:>11.3e} "
+            lines.append(f"  {c['stage']:<{stage_w}s} {cos_s:>9s} {nr_s:>7s} {maxa:>11.3e} "
                          f"{meana:>11.3e} {maxr:>9.2e} {status}  {c['name_a']:<{name_w}s} | {c['name_b']}")
         lines.append("")
         verdict = (f"  {_GREEN}{_BOLD}ALL GATHERED-TENSOR CHECKS PASSED{_RESET}" if all_passed
