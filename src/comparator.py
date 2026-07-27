@@ -175,20 +175,37 @@ class PrecisionComparator:
         return results
 
     def _discover_stages(self, dump_dir: str, world_size: int) -> List[str]:
-        """Find stage subdirs (e.g. prefill, decode/step_0) under rank_0."""
+        """Find stage subdirs (e.g. prefill, decode/step_0) under rank_0.
+
+        Order: prefill first, then decode/step_N in numeric order (not
+        lexicographic — step_10 before step_2 is wrong), then anything else.
+        """
         rank0 = Path(dump_dir) / "rank_0"
         if not rank0.exists():
             return []
+
+        def _sort_key(name: str):
+            if name == "prefill":
+                return (0, 0)
+            if name.startswith("decode/step_"):
+                try:
+                    return (1, int(name.rsplit("_", 1)[1]))
+                except (ValueError, IndexError):
+                    return (1, 1 << 30)
+            return (2, 0)
+
         stages = []
+        # top-level stages (prefill, etc.)
         for p in sorted(rank0.iterdir()):
-            if p.is_dir() and (p / "dump.pt").exists():
+            if p.is_dir() and p.name != "decode" and (p / "dump.pt").exists():
                 stages.append(p.name)
-            # nested decode/step_N
-            if p.is_dir() and p.name == "decode":
-                for sp in sorted(p.iterdir()):
-                    if sp.is_dir() and (sp / "dump.pt").exists():
-                        stages.append(f"decode/{sp.name}")
-        return stages
+        # nested decode/step_N
+        decode_dir = rank0 / "decode"
+        if decode_dir.is_dir():
+            for sp in sorted(decode_dir.iterdir()):
+                if sp.is_dir() and (sp / "dump.pt").exists():
+                    stages.append(f"decode/{sp.name}")
+        return sorted(stages, key=_sort_key)
 
     # ------------------------------------------------------------------
     # Reporting
