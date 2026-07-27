@@ -85,12 +85,6 @@ def build_parser():
     g.add_argument("--tp", type=int, default=None, help="Override tensor-parallel size (vllm-ascend)")
     g.add_argument("--num-layers", type=int, default=None,
                    help="Reduce model to first N layers (huge models that don't fit)")
-    g.add_argument("--unfuse-qkv", action="store_true",
-                   help="vllm: unfuse fused_qkv_a_proj into separate Q+KV matmuls (debug)")
-    g.add_argument("--no-swiglu-limit", action="store_true",
-                   help="vllm: disable swiglu_limit (set 0) to test if it's the divergence root cause")
-    g.add_argument("--hook-expert-internals", action="store_true",
-                   help="vllm: dump gmm1+swiglu op output (swiglu_out=down_proj input) to locate expert divergence")
     g.add_argument("--dump-mode", choices=["none", "simple", "full"], default="simple",
                    help="(reserved; boundary hooks always capture in simple/full)")
 

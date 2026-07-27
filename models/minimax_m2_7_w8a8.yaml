@@ -18,8 +18,8 @@ precision:
   tp_size: 8
   dp_size: 1
   max_model_len: 4096
-  enable_expert_parallel: false   # EP off
-  additional_config: {enable_flashcomm1: true}   # Ascend flash communication 1 on
+  enable_expert_parallel: false   # EP off (locate EP-off attention divergence)
+  additional_config: {}           # flashcomm1 off (baseline)
 
 hook_spec: models/hooks/minimax_m2.yaml
 

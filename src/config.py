@@ -331,9 +331,6 @@ class UnifiedConfig:
         args.max_model_len = self.max_model_len
         args.enable_expert_parallel = self.enable_expert_parallel
         args.additional_config = self.additional_config
-        args.unfuse_qkv = getattr(args, "unfuse_qkv", False)
-        args.no_swiglu_limit = getattr(args, "no_swiglu_limit", False)
-        args.hook_expert_internals = getattr(args, "hook_expert_internals", False)
         args.messages = self.messages
         args.compare_thresholds = self.compare_thresholds
         args.vllm_versions = self.vllm_versions

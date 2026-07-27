@@ -69,9 +69,6 @@ class DumpRunner:
             "enable_expert_parallel": self.cfg.enable_expert_parallel,
             "additional_config": self.cfg.additional_config,
             "messages": self.cfg.messages,
-            "unfuse_qkv": getattr(self.args, "unfuse_qkv", False),
-            "no_swiglu_limit": getattr(self.args, "no_swiglu_limit", False),
-            "hook_expert_internals": getattr(self.args, "hook_expert_internals", False),
         }
 
     def run(self):
