@@ -87,6 +87,12 @@ def _module_exec_key(name: str):
     import re
     m = re.match(r"layers\.(\d+)\.(.+)$", name)
     if not m:
+        # non-layer points (e.g. expert_swiglu_out op hooks): check _STAGE_ORDER
+        # first so they sort before final_norm/logits (op hooks belong to layers,
+        # not to the final output). Falls back to final_norm/logits/other at end.
+        for kw, pos in _STAGE_ORDER:
+            if name.startswith(kw):
+                return (1 << 29, pos)
         if name == "final_norm":
             return (1 << 30, 0)
         if name == "logits":
