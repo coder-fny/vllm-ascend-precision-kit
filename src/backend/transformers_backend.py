@@ -92,7 +92,11 @@ class TransformersBackend(InferenceBackend):
             self._model = AutoModelForCausalLM.from_pretrained(model_path, **kwargs).to(self._device)
             print(f"[transformers] single-device load to {self._device}")
 
-        self._device = self._model.device  # embed device (where input_ids go)
+        # Use the embedding layer's actual device, NOT self._model.device:
+        # under device_map="auto" + offload_folder, model.device can return cpu
+        # (meta/offload), causing "indices on cpu, model on npu" errors. The
+        # embedding weight is where input_ids must live.
+        self._device = self._model.get_input_embeddings().weight.device
         self._model.eval()
         print(f"[transformers] loaded {model_path} dtype={dtype} attn={attn_impl} "
               f"quant={quant_cfg} layers={self.get_num_layers()}")
