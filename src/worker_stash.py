@@ -110,6 +110,27 @@ def w_set_prompt_len(m, prompt_len):
     _PROMPT_LEN[0] = prompt_len
 
 
+def w_disable_swiglu_limit(m):
+    """Set swiglu_limit=0 on all MoE layers to disable swigluoai clamp.
+
+    0.20.2 added swiglu_limit (clamp_limit in fused swiglu op). If disabling it
+    makes expert (mlp_out) align with 0.18.0 (which has no swiglu_limit),
+    confirms swiglu_limit is the root cause of expert divergence.
+    """
+    n = 0
+    for layer in m.model.layers:
+        moe = getattr(layer, "block_sparse_moe", None) or getattr(layer, "mlp", None)
+        if moe is None:
+            continue
+        # set swiglu_limit on the MoE module and all submodules that have it
+        targets = [moe] + list(moe.modules())
+        for sub in targets:
+            if hasattr(sub, "swiglu_limit"):
+                sub.swiglu_limit = 0
+                n += 1
+    print(f"[patch] disabled swiglu_limit (set 0) on {n} modules", flush=True)
+
+
 def w_unfuse_qkv(m):
     """Unfuse fused_qkv_a_proj: replace its forward with two separate F.linear calls.
 
