@@ -112,6 +112,9 @@ class VllmAscendBackend(InferenceBackend):
             kwargs["max_model_len"] = int(max_model_len)
         if config.get("enable_expert_parallel"):
             kwargs["enable_expert_parallel"] = True
+        add_cfg = config.get("additional_config")
+        if add_cfg:
+            kwargs["additional_config"] = add_cfg
 
         self._llm = LLM(**kwargs)
         self._config = self._llm.llm_engine.model_config.hf_config

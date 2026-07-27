@@ -39,6 +39,8 @@ PRECISION_CRITICAL_PARAMS: Dict[str, tuple] = {
     "quantization_config":  (None,        "Quantization spec (None = no quant). Scheme differing across sides => divergence expected"),
     "tp_size":              (1,           "Tensor-parallel size — sharding changes numerics"),
     "dp_size":              (1,           "Data-parallel size (batch parallelism)"),
+    "enable_expert_parallel": (False,     "MoE expert parallel (experts sharded across TP ranks)"),
+    "additional_config":    ({},          "vllm additional_config dict (Ascend knobs: enable_flashcomm1, enable_dsa_cp, refresh, ...)"),
 }
 
 
@@ -236,6 +238,14 @@ class UnifiedConfig:
         return bool(self.model_yaml.get("precision", {}).get("enable_expert_parallel", False))
 
     @property
+    def additional_config(self):
+        """vllm additional_config (dict) — Ascend-specific knobs passed to
+        VllmConfig, e.g. enable_flashcomm1, enable_dsa_cp, refresh,
+        multistream_overlap_shared_expert. Recorded in config_snapshot so
+        cross-version compares can flag mismatches."""
+        return self.model_yaml.get("precision", {}).get("additional_config") or {}
+
+    @property
     def messages(self):
         """Chat-format input (list of {role, content}). When set, both sides
         apply the tokenizer's chat template (add_generation_prompt=True) so the
@@ -320,6 +330,7 @@ class UnifiedConfig:
         args.num_layers_override = getattr(args, "num_layers", None) or self.num_layers_override
         args.max_model_len = self.max_model_len
         args.enable_expert_parallel = self.enable_expert_parallel
+        args.additional_config = self.additional_config
         args.unfuse_qkv = getattr(args, "unfuse_qkv", False)
         args.messages = self.messages
         args.compare_thresholds = self.compare_thresholds
