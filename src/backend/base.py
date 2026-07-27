@@ -73,7 +73,7 @@ class InferenceBackend(ABC):
         """Run one phase with hooks registered per ``spec``, dumping to dump_mgr.
 
         Backends implement: transformers uses in-process hooks (get_model);
-        vllm-ascend V1 uses apply_model + worker_stash (model in subprocess).
+        vllm-ascend V1 uses apply_model + vllm_v1 (model in subprocess).
         Default raises — backends must override.
         """
         raise NotImplementedError(f"{self.name} backend does not implement run_dump")

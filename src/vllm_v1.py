@@ -4,12 +4,12 @@ In vllm V1 the model lives in worker subprocesses (Worker_TP*), so hooks
 registered via ``llm.apply_model(fn)`` fire inside those workers and cannot
 call the main-process ``TensorDumpManager`` directly. This module is a
 process-local stash: hooks (running in the worker) write captured tensors here,
-and a later ``apply_model(lambda m: worker_stash.get())`` retrieves them to the
+and a later ``apply_model(lambda m: vllm_v1.get())`` retrieves them to the
 main process.
 
 Because the worker process is persistent across ``apply_model`` calls and
 ``llm.generate``, a module-level global here survives for the dump's lifetime.
-``src`` is on ``sys.path`` in the workers too, so ``from .worker_stash import``
+``src`` is on ``sys.path`` in the workers too, so ``from .vllm_v1 import``
 inside a hook closure resolves to THIS worker's copy of the global.
 """
 

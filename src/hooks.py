@@ -76,7 +76,7 @@ class HookRegistry:
 
     ``sink(stage, name, tensor)`` is the capture target — for the in-process
     (transformers) path it is ``dump_mgr.add``; for vllm-ascend V1 it is
-    ``worker_stash.add`` (the hook runs in a worker subprocess).
+    ``vllm_v1.add`` (the hook runs in a worker subprocess).
     """
 
     def __init__(self, model, spec, sink, phase: str = "prefill"):

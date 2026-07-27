@@ -201,7 +201,7 @@ class VllmAscendBackend(InferenceBackend):
         them as decode/step_{seq_len - prompt_len - 1}.
         """
         from vllm import SamplingParams, TokensPrompt
-        from .. import worker_stash
+        from .. import vllm_v1
         import functools
         ref = list(ref_tokens)
         sp = SamplingParams(temperature=0.0, max_tokens=1)
@@ -211,7 +211,7 @@ class VllmAscendBackend(InferenceBackend):
         else:
             prompt_ids = self._tokenizer(prompt).input_ids if self._tokenizer else []
         # Set prompt_len in each worker (via apply_model — workers are separate processes)
-        self._llm.apply_model(functools.partial(worker_stash.w_set_prompt_len, prompt_len=len(prompt_ids)))
+        self._llm.apply_model(functools.partial(vllm_v1.w_set_prompt_len, prompt_len=len(prompt_ids)))
 
         results = []
         accumulated = list(prompt_ids)
@@ -248,14 +248,14 @@ class VllmAscendBackend(InferenceBackend):
         disables graph capture). max_tokens=1 => a single prefill forward, so
         hooks fire exactly once per module (no decode-step contamination).
         """
-        from .. import worker_stash
+        from .. import vllm_v1
         import functools
 
         # 1. reset stash + install hooks in every worker. Use top-level
         # callables + functools.partial (picklable) since vllm V1 serializes
         # the func to workers (lambdas/closures are not serializable).
-        self._llm.apply_model(worker_stash.w_reset)
-        self._llm.apply_model(functools.partial(worker_stash.w_register, spec=spec, phase=phase))
+        self._llm.apply_model(vllm_v1.w_reset)
+        self._llm.apply_model(functools.partial(vllm_v1.w_register, spec=spec, phase=phase))
 
         # 2. run prefill or forced decode. Hooks fire in workers and are tagged
         #    by the forward counter (prefill, decode/step_*) via step_stage().
@@ -271,7 +271,7 @@ class VllmAscendBackend(InferenceBackend):
             raise ValueError(f"unknown phase: {phase}")
 
         # 3. retrieve per-worker stashes (list, one entry per TP rank)
-        stashes = self._llm.apply_model(worker_stash.w_get)
+        stashes = self._llm.apply_model(vllm_v1.w_get)
         # 4. merge into the main-process dump_mgr (all stages: prefill + decode/step_*)
         self._merge_stashes(stashes, spec, dump_mgr, phase)
         # 5. logits recompute from final_norm for every captured stage
@@ -286,7 +286,7 @@ class VllmAscendBackend(InferenceBackend):
         """
         import functools
         import torch
-        from .. import worker_stash
+        from .. import vllm_v1
         vsize = getattr(self._config, "vocab_size", None)
         n = 0
         for stage in dump_mgr.stages():
@@ -294,7 +294,7 @@ class VllmAscendBackend(InferenceBackend):
             if fn is None:
                 continue
             outs = self._llm.apply_model(
-                functools.partial(worker_stash.w_logits, final_norm=fn))
+                functools.partial(vllm_v1.w_logits, final_norm=fn))
             outs = [o for o in outs if o is not None]
             if not outs:
                 continue
