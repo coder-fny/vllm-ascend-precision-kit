@@ -110,6 +110,39 @@ def w_set_prompt_len(m, prompt_len):
     _PROMPT_LEN[0] = prompt_len
 
 
+def w_unfuse_qkv(m):
+    """Unfuse fused_qkv_a_proj: replace its forward with two separate F.linear calls.
+
+    The fused module does one big matmul [hidden -> q_lora + kv_lora + rope].
+    We split the weight and do two separate matmuls (q_a_proj + kv_a_proj),
+    same as transformers. If divergence disappears → fusion was the root cause.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    for layer in m.model.layers:
+        attn = getattr(layer, "self_attn", None)
+        mla = getattr(attn, "mla_attn", None) if attn else None
+        fused = getattr(mla, "fused_qkv_a_proj", None) if mla else None
+        if fused is None:
+            continue
+        w = fused.weight.data  # [q_lora_rank + kv_lora_rank + rope, hidden]
+        q_lora_rank = mla.q_lora_rank
+        q_w = w[:q_lora_rank].clone()
+        kv_w = w[q_lora_rank:].clone()
+
+        def _unfused_forward(self, hidden_states, *a, **kw):
+            q = F.linear(hidden_states, self._q_w)
+            kv = F.linear(hidden_states, self._kv_w)
+            return (torch.cat([q, kv], dim=-1),)
+
+        fused._q_w = q_w
+        fused._kv_w = kv_w
+        import types
+        fused.forward = types.MethodType(_unfused_forward, fused)
+    print("[unfuse] patched fused_qkv_a_proj -> separate q_a_proj + kv_a_proj matmuls", flush=True)
+
+
 def _w_incr_step(module, args, kwargs):
     """Top-level forward_pre_hook (with_kwargs=True): detect prefill vs decode
     from input shape. vllm V1 passes model inputs as kwargs (model(**inputs)),

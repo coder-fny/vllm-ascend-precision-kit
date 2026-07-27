@@ -91,6 +91,7 @@ class VllmAscendBackend(InferenceBackend):
         trc = config.get("trust_remote_code", True)
         nlo = config.get("num_layers_override")
         max_model_len = config.get("max_model_len")
+        unfuse_qkv = config.get("unfuse_qkv", False)
         self._messages = config.get("messages")
 
         if nlo:
@@ -113,6 +114,10 @@ class VllmAscendBackend(InferenceBackend):
         self._llm = LLM(**kwargs)
         self._config = self._llm.llm_engine.model_config.hf_config
         self._model = self._get_model_inplace()
+        if unfuse_qkv:
+            from .. import worker_stash
+            self._llm.apply_model(worker_stash.w_unfuse_qkv)
+            print("[vllm-ascend] unfused qkv_a_proj (separate Q+KV matmuls)")
         print(f"[vllm-ascend] loaded {model_path} dtype={dtype} enforce_eager={enforce_eager} "
               f"tp={tp} quant={quant} max_model_len={max_model_len} layers={self.get_num_layers()}")
 

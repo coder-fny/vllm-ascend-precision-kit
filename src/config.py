@@ -314,6 +314,7 @@ class UnifiedConfig:
         args.quantization_config = self.quantization_config
         args.num_layers_override = getattr(args, "num_layers", None) or self.num_layers_override
         args.max_model_len = self.max_model_len
+        args.unfuse_qkv = getattr(args, "unfuse_qkv", False)
         args.messages = self.messages
         args.compare_thresholds = self.compare_thresholds
         args.vllm_versions = self.vllm_versions

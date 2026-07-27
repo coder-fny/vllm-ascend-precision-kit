@@ -67,6 +67,7 @@ class DumpRunner:
             "num_layers_override": getattr(self.args, "num_layers_override", None),
             "max_model_len": self.cfg.max_model_len,
             "messages": self.cfg.messages,
+            "unfuse_qkv": getattr(self.args, "unfuse_qkv", False),
         }
 
     def run(self):
