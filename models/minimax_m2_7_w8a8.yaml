@@ -18,8 +18,8 @@ precision:
   tp_size: 8
   dp_size: 1
   max_model_len: 4096
-  enable_expert_parallel: true    # MoE experts sharded across 8 TP ranks (EP)
-  additional_config: {}           # Ascend knobs, e.g. {enable_flashcomm1: true, enable_dsa_cp: true, refresh: false}
+  enable_expert_parallel: false   # EP off
+  additional_config: {enable_flashcomm1: true}   # Ascend flash communication 1 on
 
 hook_spec: models/hooks/minimax_m2.yaml
 
