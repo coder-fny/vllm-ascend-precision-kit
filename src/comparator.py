@@ -63,10 +63,12 @@ _STAGE_ORDER = [
     ("q_a_layernorm", 3), ("q_b_proj", 4), ("kv_a_proj", 5), ("k_proj", 5),
     ("v_proj", 5), ("kv_a_layernorm", 6), ("kv_b_proj", 7),
     ("o_proj.in", 8), ("o_proj.out", 9), ("o_proj", 8),
-    ("attn_out", 10), ("ln2_in", 11),
-    ("gate_proj", 12), ("up_proj", 13),
-    ("down_proj.in", 14), ("down_proj.out", 15), ("down_proj", 14),
-    ("mlp_out", 16),
+    ("attn_out", 10), ("ln2_in", 11), ("ln2_out", 12),
+    # MoE: router(gate) runs BEFORE experts — it decides routing, then experts compute
+    ("router.out", 13), ("expert_swiglu_out", 14),
+    ("gate_proj", 15), ("up_proj", 16),
+    ("down_proj.in", 17), ("down_proj.out", 18), ("down_proj", 17),
+    ("mlp_out", 19),
 ]
 
 
