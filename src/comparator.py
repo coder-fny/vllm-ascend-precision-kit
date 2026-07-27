@@ -267,9 +267,9 @@ class PrecisionComparator:
                      f"(maxAbs/meanAbs abs diff, maxRel sym rel diff).")
         # Dynamic column widths from actual content so columns always align.
         stage_w = max([len(c["stage"]) for c in comparisons] + [len("Stage")])
-        name_w = max([len(c["name_a"]) for c in comparisons] + [len("name")])
+        name_w = max([len(c["name_a"]) for c in comparisons] + [len("name_a")])
         lines.append(f"  {'Stage':<{stage_w}s} {'CosSim':>9s} {'maxAbs':>11s} {'meanAbs':>11s} {'maxRel':>9s} "
-                     f"{'Res':>4s}  {'name':<{name_w}s} | name_b")
+                     f"{'Res':>4s}  {'name_a':<{name_w}s} | name_b")
         all_passed = True
         for c in comparisons:
             all_passed = all_passed and c["passed"]
