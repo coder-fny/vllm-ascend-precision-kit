@@ -265,8 +265,8 @@ class PrecisionComparator:
         lines = ["", f"{_BOLD}  PRECISION COMPARISON REPORT - {title}{_RESET}"]
         lines.append(f"  Pass = cosine_sim >= {cos_thr:.4f}; element-wise errors shown for severity "
                      f"(maxAbs/meanAbs abs diff, maxRel sym rel diff).")
-        lines.append(f"  {'Stage':<12s} {'CosSim':>9s} {'maxAbs':>11s} {'meanAbs':>11s} {'maxRel':>9s} "
-                     f"Result  name_a | name_b")
+        lines.append(f"  {'Stage':<14s} {'CosSim':>9s} {'maxAbs':>11s} {'meanAbs':>11s} {'maxRel':>9s} "
+                     f"{'Res':>4s}  {'name':<34s} | name_b")
         all_passed = True
         for c in comparisons:
             all_passed = all_passed and c["passed"]
@@ -276,8 +276,8 @@ class PrecisionComparator:
             maxa = c.get("max_abs_diff", float("nan"))
             meana = c.get("mean_abs_diff", float("nan"))
             maxr = c.get("max_rel_diff", float("nan"))
-            lines.append(f"  {c['stage']:<12s} {cos_s:>9s} {maxa:>11.3e} "
-                         f"{meana:>11.3e} {maxr:>9.2e} {status}  {c['name_a']} | {c['name_b']}")
+            lines.append(f"  {c['stage']:<14s} {cos_s:>9s} {maxa:>11.3e} "
+                         f"{meana:>11.3e} {maxr:>9.2e} {status}  {c['name_a']:<34s} | {c['name_b']}")
         lines.append("")
         verdict = (f"  {_GREEN}{_BOLD}ALL GATHERED-TENSOR CHECKS PASSED{_RESET}" if all_passed
                    else f"  {_RED}{_BOLD}SOME GATHERED-TENSOR CHECKS FAILED{_RESET}")
