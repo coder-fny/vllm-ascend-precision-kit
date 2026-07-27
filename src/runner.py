@@ -127,21 +127,21 @@ class DumpRunner:
         return [int(t) for t in toks]
 
     def _reconstruct_residuals(self, dump_mgr, num_layers: int):
-        """Reconstruct the true per-layer residual stream for EVERY captured
-        stage (prefill + decode/step_*).
+        """Reconstruct ln2_in (post-attn residual) for EVERY captured stage.
 
-        Two vllm fused-AddRMSNorm quirks mean the raw hook capture is not the
-        true layer-entering residual:
+        ln1_in (input_layernorm input) is captured CORRECTLY by the hook itself:
+        vllm's fused AddRMSNorm is called as ``norm(delta, residual)`` and the
+        hook captures ``args[0] + args[1]`` = delta + old_residual = the true
+        layer-entering residual (new residual, already including prev mlp_out).
+        HF's single-arg ``norm(residual)`` captures ``args[0]`` = the residual
+        directly. So NO post-hoc ln1_in fix is needed on either side.
 
-        1. ln1_in (input_layernorm args[1]): vllm adds prev_mlp_delta to the
-           residual INSIDE the fused norm, so args[1] misses the previous
-           layer's mlp_out. (HF adds mlp before the next norm, so its ln1_in is
-           already correct.)
-           => vllm only: ln1_in[L] = captured_ln1_in[L] + mlp_out[L-1]  (L>0).
+        (Previously the hook captured only args[1] and the runner added
+        mlp_out[L-1] here; after the hook was changed to args[0]+args[1] that
+        became a double-count. This is now removed.)
 
-        2. ln2_in (post_attention_layernorm): the post-attn residual is fused
-           inside the norm on both sides. Reconstruct uniformly:
-           ln2_in[L] = ln1_in[L] + attn_out[L].
+        ln2_in (post_attention_layernorm input = post-attn residual) is still
+        reconstructed uniformly: ln2_in[L] = ln1_in[L] + attn_out[L].
         """
         import torch
 
@@ -153,21 +153,8 @@ class DumpRunner:
                     b = b.squeeze(0)
             return (a.to(torch.float32) + b.to(torch.float32))
 
-        is_vllm = getattr(self.args, "side", "") == "vllm_ascend"
         for stage in dump_mgr.stages():
-            # (1) vllm ln1_in: add the missing previous layer's mlp_out.
-            if is_vllm:
-                for L in range(1, num_layers):
-                    cur = dump_mgr.get_tensor(stage, f"layers.{L}.ln1_in")
-                    prev_mlp = dump_mgr.get_tensor(stage, f"layers.{L - 1}.mlp_out")
-                    if cur is None or prev_mlp is None:
-                        continue
-                    try:
-                        dump_mgr.add(stage, f"layers.{L}.ln1_in",
-                                     _add(cur, prev_mlp).to(cur.dtype))
-                    except Exception as e:
-                        print(f"[Runner] vllm ln1_in fix failed {stage} L{L}: {e}")
-            # (2) ln2_in = ln1_in + attn_out (uses the corrected ln1_in).
+            # ln2_in = ln1_in + attn_out (uniform for both sides).
             for L in range(num_layers):
                 ln1 = dump_mgr.get_tensor(stage, f"layers.{L}.ln1_in")
                 attn = dump_mgr.get_tensor(stage, f"layers.{L}.attn_out")
