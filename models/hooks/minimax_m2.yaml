@@ -11,6 +11,7 @@ hook_points:
   - {id: "layers.{L}.ln1_in",   module: "model.layers.{L}.input_layernorm",          capture: input,  replicated: true}
   - {id: "layers.{L}.attn_out", module: "model.layers.{L}.self_attn",                capture: output, replicated: true}
   - {id: "layers.{L}.ln2_in",   module: "model.layers.{L}.post_attention_layernorm", capture: input,  replicated: true}
+  - {id: "layers.{L}.ln2_out",  module: "model.layers.{L}.post_attention_layernorm", capture: output, replicated: true}   # norm out = gate input
   - {id: "layers.{L}.mlp_out",  module: "model.layers.{L}.mlp",                      capture: output, replicated: true}   # HF name; vllm override below
   - {id: "final_norm",          module: "model.norm",                                capture: output, replicated: true}
   - {id: "logits",              module: "lm_head",                                   capture: output, replicated: true}
@@ -22,8 +23,10 @@ hook_points:
   - {id: "layers.{L}.o_proj.out",  module: "model.layers.{L}.self_attn.o_proj",  capture: output, replicated: true}
 
 # vllm-ascend: MoE module is `block_sparse_moe` (not `mlp`). Applies to all versions.
+# Also hook `block_sparse_moe.gate` (router logits, fp32) to diagnose routing divergence.
 overrides:
   vllm_ascend:
     "":
       hook_points:
         - {id: "layers.{L}.mlp_out", module: "model.layers.{L}.block_sparse_moe", capture: output, replicated: true}
+        - {id: "layers.{L}.router.out", module: "model.layers.{L}.block_sparse_moe.gate", capture: output, replicated: true}
