@@ -165,7 +165,7 @@ class TransformersBackend(InferenceBackend):
                 # Seed KV cache with the prompt (hooks fire, stage=prefill).
                 registry.current_stage = "prefill"
                 with torch.no_grad():
-                    out = self._model(input_ids=input_ids, use_cache=True)
+                    out = self._model(input_ids=input_ids.to(self._device), use_cache=True)
                 kv = out.past_key_values
                 # Forced decode: feed ref[i] one token at a time. Hooks fire
                 # each step (stage=decode/step_i), aligned with vllm's decode
