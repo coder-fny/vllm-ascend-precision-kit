@@ -18,6 +18,7 @@ precision:
   tp_size: 8
   dp_size: 1
   max_model_len: 4096
+  enable_expert_parallel: true    # MoE experts sharded across 8 TP ranks (EP)
 
 hook_spec: models/hooks/minimax_m2.yaml
 

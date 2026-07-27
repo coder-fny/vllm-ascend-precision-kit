@@ -231,6 +231,11 @@ class UnifiedConfig:
         return int(m) if m else None
 
     @property
+    def enable_expert_parallel(self):
+        """vllm enable_expert_parallel (MoE experts sharded across TP ranks)."""
+        return bool(self.model_yaml.get("precision", {}).get("enable_expert_parallel", False))
+
+    @property
     def messages(self):
         """Chat-format input (list of {role, content}). When set, both sides
         apply the tokenizer's chat template (add_generation_prompt=True) so the
@@ -314,6 +319,7 @@ class UnifiedConfig:
         args.quantization_config = self.quantization_config
         args.num_layers_override = getattr(args, "num_layers", None) or self.num_layers_override
         args.max_model_len = self.max_model_len
+        args.enable_expert_parallel = self.enable_expert_parallel
         args.unfuse_qkv = getattr(args, "unfuse_qkv", False)
         args.messages = self.messages
         args.compare_thresholds = self.compare_thresholds

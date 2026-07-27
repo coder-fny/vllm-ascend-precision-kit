@@ -110,6 +110,8 @@ class VllmAscendBackend(InferenceBackend):
             kwargs["quantization"] = quant if isinstance(quant, str) else None
         if max_model_len:
             kwargs["max_model_len"] = int(max_model_len)
+        if config.get("enable_expert_parallel"):
+            kwargs["enable_expert_parallel"] = True
 
         self._llm = LLM(**kwargs)
         self._config = self._llm.llm_engine.model_config.hf_config

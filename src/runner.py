@@ -66,6 +66,7 @@ class DumpRunner:
             "trust_remote_code": self.cfg.trust_remote_code,
             "num_layers_override": getattr(self.args, "num_layers_override", None),
             "max_model_len": self.cfg.max_model_len,
+            "enable_expert_parallel": self.cfg.enable_expert_parallel,
             "messages": self.cfg.messages,
             "unfuse_qkv": getattr(self.args, "unfuse_qkv", False),
         }
