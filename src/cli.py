@@ -89,6 +89,8 @@ def build_parser():
                    help="vllm: unfuse fused_qkv_a_proj into separate Q+KV matmuls (debug)")
     g.add_argument("--no-swiglu-limit", action="store_true",
                    help="vllm: disable swiglu_limit (set 0) to test if it's the divergence root cause")
+    g.add_argument("--hook-expert-internals", action="store_true",
+                   help="vllm: dump gmm1+swiglu op output (swiglu_out=down_proj input) to locate expert divergence")
     g.add_argument("--dump-mode", choices=["none", "simple", "full"], default="simple",
                    help="(reserved; boundary hooks always capture in simple/full)")
 

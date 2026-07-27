@@ -110,6 +110,35 @@ def w_set_prompt_len(m, prompt_len):
     _PROMPT_LEN[0] = prompt_len
 
 
+def w_hook_expert_internals(m):
+    """Monkey-patch the gmm1+swiglu fused op to dump its output (swiglu_out =
+    down_proj input), locating whether expert divergence is in gmm1+swiglu
+    (the fused op that switches between 0.18.0 torch_npu and 0.20.2 _C_ascend)
+    or in down_proj. Dumps first N calls."""
+    import torch
+    try:
+        from vllm_ascend.device.device_op import DeviceOperator
+    except Exception:
+        print("[patch] DeviceOperator not found, skip expert hook", flush=True)
+        return
+    orig = DeviceOperator.npu_grouped_matmul_swiglu_quant
+    cnt = [0]
+    N = 4  # dump first 4 calls (covers layer 0-1 experts)
+
+    def patched(*args, **kwargs):
+        out = orig(*args, **kwargs)
+        if cnt[0] < N:
+            hs = out[0] if isinstance(out, tuple) else out
+            if isinstance(hs, torch.Tensor):
+                add("prefill", f"expert_swiglu_out_{cnt[0]}", hs.detach().cpu().clone())
+                cnt[0] += 1
+                print(f"[expert-hook] dumped gmm1+swiglu out #{cnt[0]} shape={list(hs.shape)}", flush=True)
+        return out
+
+    DeviceOperator.npu_grouped_matmul_swiglu_quant = patched
+    print("[patch] hooked expert gmm1+swiglu op (npu_grouped_matmul_swiglu_quant)", flush=True)
+
+
 def w_disable_swiglu_limit(m):
     """Set swiglu_limit=0 on all MoE layers to disable swigluoai clamp.
 

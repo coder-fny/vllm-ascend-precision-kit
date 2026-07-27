@@ -93,6 +93,7 @@ class VllmAscendBackend(InferenceBackend):
         max_model_len = config.get("max_model_len")
         unfuse_qkv = config.get("unfuse_qkv", False)
         no_swiglu_limit = config.get("no_swiglu_limit", False)
+        hook_expert_internals = config.get("hook_expert_internals", False)
         self._messages = config.get("messages")
 
         if nlo:
@@ -128,6 +129,10 @@ class VllmAscendBackend(InferenceBackend):
             from .. import worker_stash
             self._llm.apply_model(worker_stash.w_disable_swiglu_limit)
             print("[vllm-ascend] disabled swiglu_limit (set 0) to test root cause")
+        if hook_expert_internals:
+            from .. import worker_stash
+            self._llm.apply_model(worker_stash.w_hook_expert_internals)
+            print("[vllm-ascend] hooked expert gmm1+swiglu op (dump swiglu_out)")
         print(f"[vllm-ascend] loaded {model_path} dtype={dtype} enforce_eager={enforce_eager} "
               f"tp={tp} quant={quant} max_model_len={max_model_len} layers={self.get_num_layers()}")
 
