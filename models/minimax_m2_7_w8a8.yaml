@@ -1,0 +1,38 @@
+# MiniMaxM2-7 W8A8_DYNAMIC (QuaRot, Ascend modelslim) — cross-version prefill compare.
+# vllm0202 (vllm-ascend 0.20.2, VLLM_VERSION=0.20.2) vs vllm0180 (0.18.0).
+# Both sides run vllm-ascend with the SAME W8A8 model; compare prefill activations
+# to localize version-to-version regression.
+# 215GB / TP=8 ~= 27GB/card -> fits 910A3 (64GB).
+# Selected via --model minimax_m2_7_w8a8
+model:
+  name: MiniMaxM2-7
+  hf_model_path: /home/admin/model-csi/models/modelhub_49900019_minimax-m2-7-w8a8-quarot-120800058_20260413120015/model
+  architecture: minimax_m2
+  trust_remote_code: true
+
+precision:
+  dtype: bfloat16
+  attn_implementation: eager
+  enforce_eager: true
+  quantization_config: ascend    # AscendModelSlimConfig reads quant_model_description.json -> W8A8_DYNAMIC
+  tp_size: 8
+  dp_size: 1
+  max_model_len: 4096
+
+hook_spec: models/hooks/minimax_m2.yaml
+
+prompt: "The quick brown fox jumps over the lazy dog. The capital of France is"
+max_new_tokens: 8
+
+compare:
+  thresholds:
+    cosine: 0.95
+    abs_mean_rel_diff: 0.05
+    norm_rel_diff: 0.05
+
+output_dir: ./dumped
+
+env:
+  ASCEND_DEVICE_ID: "0,1,2,3,4,5,6,7"
+  VLLM_VERSION: "0.20.2"
+  VLLM_ALLOW_INSECURE_SERIALIZATION: "1"

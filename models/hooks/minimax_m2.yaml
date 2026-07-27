@@ -1,0 +1,25 @@
+# HookSpec for MiniMaxM2 (MiniMaxM2ForCausalLM).
+# MoE (MiniMaxM2SparseMoeBlock) + fused qkv_proj (QKVParallelLinear) + q_norm/k_norm
+# (use_qk_norm=true, per-head RMSNorm). q/k/v_proj are fused into qkv_proj so
+# single q_proj hooks skip on vllm (like qwen3). o_proj is separate.
+# Module boundaries match the standard decoder layout. ln2_in reconstructed by
+# runner (fused AddRMSNorm); ln1_in captured directly (args[0]+args[1] = true residual).
+architecture: minimax_m2
+num_layers_from: config.num_hidden_layers
+
+hook_points:
+  # --- module boundaries ---
+  - {id: "layers.{L}.ln1_in",   module: "model.layers.{L}.input_layernorm",          capture: input,  replicated: true}
+  - {id: "layers.{L}.attn_out", module: "model.layers.{L}.self_attn",                capture: output, replicated: true}   # o_proj all-reduced -> full
+  - {id: "layers.{L}.ln2_in",   module: "model.layers.{L}.post_attention_layernorm", capture: input,  replicated: true}
+  - {id: "layers.{L}.mlp_out",  module: "model.layers.{L}.mlp",                      capture: output, replicated: true}   # down_proj all-reduced -> full
+  - {id: "final_norm",          module: "model.norm",                                capture: output, replicated: true}
+  - {id: "logits",              module: "lm_head",                                   capture: output, replicated: true}
+
+  # --- accessible op boundaries (qkv fused -> skip q/k/v; o_proj + qk_norm separate) ---
+  - {id: "layers.{L}.q_norm.out",  module: "model.layers.{L}.self_attn.q_norm",  capture: output, replicated: true}
+  - {id: "layers.{L}.k_norm.out",  module: "model.layers.{L}.self_attn.k_norm",  capture: output, replicated: true}
+  - {id: "layers.{L}.o_proj.in",   module: "model.layers.{L}.self_attn.o_proj",  capture: input,  replicated: false}
+  - {id: "layers.{L}.o_proj.out",  module: "model.layers.{L}.self_attn.o_proj",  capture: output, replicated: true}
+
+overrides: {}
