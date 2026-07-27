@@ -23,10 +23,20 @@ hook_points:
   - {id: "layers.{L}.o_proj.out",  module: "model.layers.{L}.self_attn.o_proj",  capture: output, replicated: true}
 
 # vllm-ascend: MoE module is `block_sparse_moe` (not `mlp`). Applies to all versions.
-# Also hook `block_sparse_moe.gate` (router logits, fp32) to diagnose routing divergence.
+# Also hook `block_sparse_moe.gate` (router logits, fp32) + expert gmm1+swiglu op
+# (per-rank op hook, to locate expert-internal divergence without cross-rank merge issues).
 overrides:
   vllm_ascend:
     "":
       hook_points:
         - {id: "layers.{L}.mlp_out", module: "model.layers.{L}.block_sparse_moe", capture: output, replicated: true}
         - {id: "layers.{L}.router.out", module: "model.layers.{L}.block_sparse_moe.gate", capture: output, replicated: true}
+        # op hook: dump gmm1+swiglu fused op output (swiglu_out = down_proj input).
+        # per_rank: key carries _rank{r} to avoid cross-rank merge order corruption.
+        # call_index: first 4 calls (layer 0-1 experts).
+        - {id: "expert_swiglu_out", op: "vllm_ascend.device.device_op.DeviceOperator.npu_grouped_matmul_swiglu_quant", capture: output, per_rank: true, call_index: "0-3"}
+
+# Modifiers (yaml-declared patches, applied before hooks). Uncomment to enable.
+# - disable swiglu_limit (test if it's root cause): set swiglu_limit=0 on all MoE layers
+# modifiers:
+#   - {action: set_attr, target: "model.layers.{L}.block_sparse_moe", attr: swiglu_limit, value: 0}

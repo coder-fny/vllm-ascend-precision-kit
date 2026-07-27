@@ -235,10 +235,14 @@ def w_register(m, spec, phase):
 
     The stage is derived from the forward counter (prefill vs decode/step_*)
     via step_stage(), so the same hooks serve prefill and forced-decode runs.
+    Applies yaml modifiers (set_attr/unfuse_qkv) before registering hooks.
     """
     from .hooks import HookRegistry
     reg = HookRegistry(m, spec, add, phase)
     reg.stage_provider = stage  # _w_incr_step sets _STAGE via set_stage_by_input
+    num_layers = len(m.model.layers) if hasattr(m, "model") and hasattr(m.model, "layers") else 0
+    if spec.modifiers:
+        reg.apply_modifiers(spec.modifiers, num_layers)
     reg.register()
     # Counter hook on the top-level model (fires before sub-module hooks).
     try:

@@ -153,6 +153,8 @@ class TransformersBackend(InferenceBackend):
         from ..hooks import HookRegistry
         registry = HookRegistry(self._model, spec, dump_mgr.add, phase)
         registry.current_stage = phase
+        if spec.modifiers:
+            registry.apply_modifiers(spec.modifiers, self.get_num_layers())
         registry.register()
         try:
             input_ids = self.encode(prompt)
