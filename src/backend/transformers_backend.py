@@ -68,8 +68,13 @@ class TransformersBackend(InferenceBackend):
 
         # Adaptive placement: device_map="auto" (shard across NPUs) when
         # accelerate is available; otherwise load to a single NPU card.
+        # Reduced-layer (num_layers_override) models are small — load single-card
+        # to avoid device_map/offload device-mismatch headaches in the decode loop.
+        use_device_map = (not nlo)
         try:
             import accelerate  # noqa: F401
+            if not use_device_map:
+                raise ImportError  # fall through to single-card
             kwargs["device_map"] = "auto"
             # Cap per-device memory so device_map balances evenly. MoE layers are
             # large + indivisible; without a cap it can stack several on one card
