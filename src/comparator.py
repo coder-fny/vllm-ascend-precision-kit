@@ -55,6 +55,49 @@ def load_summary_stats(result_dir: str) -> Dict[str, Any]:
         return json.load(f)
 
 
+# Execution-order sort keys so the report reads prefill -> decode/step_N,
+# and within each stage: ln1_in -> q_proj -> ... -> attn_out -> ln2_in ->
+# mlp proj -> mlp_out -> final_norm -> logits (not lexicographic).
+_STAGE_ORDER = [
+    ("ln1_in", 0), ("fused_qkv_a_proj", 1), ("q_a_proj", 2), ("q_proj", 2),
+    ("q_a_layernorm", 3), ("q_b_proj", 4), ("kv_a_proj", 5), ("k_proj", 5),
+    ("v_proj", 5), ("kv_a_layernorm", 6), ("kv_b_proj", 7),
+    ("o_proj.in", 8), ("o_proj.out", 9), ("o_proj", 8),
+    ("attn_out", 10), ("ln2_in", 11),
+    ("gate_proj", 12), ("up_proj", 13),
+    ("down_proj.in", 14), ("down_proj.out", 15), ("down_proj", 14),
+    ("mlp_out", 16),
+]
+
+
+def _stage_sort_key(stage: str):
+    if stage == "prefill":
+        return 0
+    if stage.startswith("decode/step_"):
+        try:
+            return 1 + int(stage.rsplit("_", 1)[1])
+        except (ValueError, IndexError):
+            return 1 << 30
+    return 1 << 30
+
+
+def _module_exec_key(name: str):
+    import re
+    m = re.match(r"layers\.(\d+)\.(.+)$", name)
+    if not m:
+        if name == "final_norm":
+            return (1 << 30, 0)
+        if name == "logits":
+            return (1 << 30, 1)
+        return (1 << 30, 2)
+    layer = int(m.group(1))
+    rest = m.group(2)
+    for kw, pos in _STAGE_ORDER:
+        if rest == kw or rest.startswith(kw):
+            return (layer, pos)
+    return (layer, 100)
+
+
 # Re-exported for cli convenience (parallel-tag parsing lives in parallel_merge).
 from .parallel_merge import parse_parallel_tag  # noqa: E402
 
@@ -172,6 +215,9 @@ class PrecisionComparator:
                     "norm_reldiff": nm["rel_diff"],
                     "passed": cos_ok,
                 })
+        # Sort by execution order: stage (prefill -> decode/step_N) then module
+        # (ln1_in -> q_proj -> ... -> mlp_out -> final_norm -> logits).
+        results.sort(key=lambda c: (_stage_sort_key(c["stage"]), _module_exec_key(c["name_a"])))
         return results
 
     def _discover_stages(self, dump_dir: str, world_size: int) -> List[str]:
