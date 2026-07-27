@@ -6,7 +6,7 @@
 # Selected via --model minimax_m2_7_w8a8
 model:
   name: MiniMaxM2-7
-  hf_model_path: /home/admin/model-csi/models/modelhub_49900019_minimax-m2-7-w8a8-quarot-120800058_20260413120015/model
+  hf_model_path: /mnt/sfs_turbo/models/minimax_m2_7_w8a8/model   # shared NAS (both pods read same path)
   architecture: minimax_m2
   trust_remote_code: true
 
