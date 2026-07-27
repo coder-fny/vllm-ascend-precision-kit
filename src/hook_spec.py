@@ -92,14 +92,15 @@ def load_hook_spec(path: str, num_layers: int,
     base_points = [_parse_point(p) for p in raw.get("hook_points", [])]
 
     # Merge overrides by id (override replaces module/capture/etc. for that id).
+    # Apply version-agnostic ("") first, then version-specific (specific wins).
     override_points = {}
     if side:
         side_overrides = raw.get("overrides", {}).get(side, {})
-        ver_key = version or ""
-        ver_entry = side_overrides.get(ver_key, {}) if ver_key else {}
-        for p in ver_entry.get("hook_points", []):
-            hp = _parse_point(p)
-            override_points[hp.id] = hp
+        ver_keys = ["", version] if version else [""]
+        for ver_key in ver_keys:
+            for p in side_overrides.get(ver_key, {}).get("hook_points", []):
+                hp = _parse_point(p)
+                override_points[hp.id] = hp
 
     merged: List[HookPoint] = []
     for p in base_points:
