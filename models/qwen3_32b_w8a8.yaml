@@ -1,9 +1,7 @@
-# Qwen3-32B — option A: vllm-ascend W8A8 quantized vs transformers bf16 reference.
-# Same base model (Qwen3-32B dense, 64 layers), two forms:
-#   - vllm_ascend side: pre-quantized W8A8 (int8 weights), quantization="ascend"
-#     (reads quant_model_description.json via AscendModelSlimConfig).
-#   - transformers side: bf16 reference (pulled via model-cli), no quantization.
-# Side-specific paths + quantization via the `sides` section.
+# Qwen3-32B — option A: vllm-ascend W8A8 quantized (reduced 2-layer ckpt) vs
+# transformers bf16 reference (num_layers_override=2). Same base model.
+# Dense Qwen3 (64 layers) -> 2-layer reduced fits single card.
+# Pod: vllm0202 (vllm-ascend 0.20.2, VLLM_VERSION=0.20.2).
 # Selected via --model qwen3_32b_w8a8
 
 model:
@@ -11,31 +9,27 @@ model:
   hf_model_path: /home/admin/model-csi/models/modelhub_12000053_qwen3-32b-81500124_20250818202543/model
   architecture: qwen3
   trust_remote_code: true
+  num_layers_override: 2
 
 precision:
   dtype: bfloat16
   attn_implementation: eager
   enforce_eager: true
   quantization_config: null        # default (transformers bf16 reference)
-  tp_size: 2
+  tp_size: 1
   dp_size: 1
+  max_model_len: 4096
 
-# Side-specific overrides for option A
+# vllm-ascend side: reduced W8A8 checkpoint (2 layers, ascend quant)
 sides:
   vllm_ascend:
-    hf_model_path: /mnt/sfs_turbo/models/Qwen3-32B-w8a8-nopdmix
+    hf_model_path: /data/qwen3_32b_w8a8_2l
     quantization_config: ascend    # AscendModelSlimConfig reads quant_model_description.json -> W8A8
 
 hook_spec: models/hooks/qwen3.yaml
 
 prompt: "The quick brown fox jumps over the lazy dog. The capital of France is"
 max_new_tokens: 8
-
-vllm:
-  versions:
-    "0.21.1":
-      pythonpath: []
-      env: {}
 
 compare:
   thresholds:
@@ -46,6 +40,6 @@ compare:
 output_dir: ./dumped
 
 env:
-  ASCEND_DEVICE_ID: "0,1,2,3"
-  VLLM_VERSION: "0.21.0"
+  ASCEND_DEVICE_ID: "0"
+  VLLM_VERSION: "0.20.2"
   VLLM_ALLOW_INSECURE_SERIALIZATION: "1"
