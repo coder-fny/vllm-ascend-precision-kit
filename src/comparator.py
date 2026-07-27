@@ -203,8 +203,12 @@ class PrecisionComparator:
                 am = compare_value(sa.get("abs_mean", 0.0), sb.get("abs_mean", 0.0), rtol=self.tensor_rtol)
                 nm = compare_value(sa.get("norm", 0.0), sb.get("norm", 0.0), rtol=self.tensor_rtol)
                 cos_ok = (cos == cos) and (cos >= cos_thr)  # cos==cos filters NaN
-                # PASS is cosine-driven (alignment); element-wise error stats
-                # (max/mean/max-rel abs diff) are shown for severity judgment.
+                nr = d["norm_ratio"]
+                # PASS requires cosine alignment AND norm_ratio ~1. Cosine is
+                # scale-invariant, so an 8x magnitude difference still yields
+                # cosine 0.998 — that is a real divergence (e.g. expert op
+                # output scale mismatch), not alignment. norm_tol=0.2 => [0.8,1.2].
+                norm_ok = (nr == nr) and (0.8 <= nr <= 1.2)
                 results.append({
                     "stage": stage, "name_a": name_a, "name_b": name_b,
                     "cosine_sim": cos,
@@ -214,7 +218,7 @@ class PrecisionComparator:
                     "norm_ratio": d["norm_ratio"],
                     "abs_mean_reldiff": am["rel_diff"],
                     "norm_reldiff": nm["rel_diff"],
-                    "passed": cos_ok,
+                    "passed": cos_ok and norm_ok,
                 })
         # Sort by execution order: stage (prefill -> decode/step_N) then module
         # (ln1_in -> q_proj -> ... -> mlp_out -> final_norm -> logits).

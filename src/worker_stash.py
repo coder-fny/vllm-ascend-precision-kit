@@ -114,13 +114,22 @@ def w_hook_expert_internals(m):
     """Monkey-patch the gmm1+swiglu fused op to dump its output (swiglu_out =
     down_proj input), locating whether expert divergence is in gmm1+swiglu
     (the fused op that switches between 0.18.0 torch_npu and 0.20.2 _C_ascend)
-    or in down_proj. Dumps first N calls."""
+    or in down_proj. Dumps first N calls per rank.
+
+    Key carries rank suffix (expert_swiglu_out_{N}_rank{r}) so _merge_stashes
+    keeps each rank's output separate instead of concat across ranks — gmm1+swiglu
+    output is per-rank sharded, and cross-rank concat order differs between sides,
+    which would corrupt cosine. Per-rank keys let compare match rank0 vs rank0."""
     import torch
     try:
         from vllm_ascend.device.device_op import DeviceOperator
     except Exception:
         print("[patch] DeviceOperator not found, skip expert hook", flush=True)
         return
+    try:
+        rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+    except Exception:
+        rank = 0
     orig = DeviceOperator.npu_grouped_matmul_swiglu_quant
     cnt = [0]
     N = 4  # dump first 4 calls (covers layer 0-1 experts)
@@ -130,13 +139,13 @@ def w_hook_expert_internals(m):
         if cnt[0] < N:
             hs = out[0] if isinstance(out, tuple) else out
             if isinstance(hs, torch.Tensor):
-                add("prefill", f"expert_swiglu_out_{cnt[0]}", hs.detach().cpu().clone())
+                add("prefill", f"expert_swiglu_out_{cnt[0]}_rank{rank}", hs.detach().cpu().clone())
                 cnt[0] += 1
-                print(f"[expert-hook] dumped gmm1+swiglu out #{cnt[0]} shape={list(hs.shape)}", flush=True)
+                print(f"[expert-hook] r{rank} dumped gmm1+swiglu out #{cnt[0]} shape={list(hs.shape)}", flush=True)
         return out
 
     DeviceOperator.npu_grouped_matmul_swiglu_quant = patched
-    print("[patch] hooked expert gmm1+swiglu op (npu_grouped_matmul_swiglu_quant)", flush=True)
+    print(f"[patch] hooked expert gmm1+swiglu op (rank{rank})", flush=True)
 
 
 def w_disable_swiglu_limit(m):
