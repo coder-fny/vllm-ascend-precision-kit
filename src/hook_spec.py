@@ -22,35 +22,43 @@ from typing import List, Optional
 @dataclass
 class HookPoint:
     id: str               # canonical dump key (expanded, no {L})
-    module: str           # module path (expanded, no {L})
-    capture: str          # "input" | "output"
+    module: str = ""      # nn.Module path (module hook). Empty for op hook.
+    op: str = ""          # op/function path (op hook: monkey-patch to dump I/O)
+    capture: str = "output"  # "input" | "output"
     phases: List[str] = field(default_factory=lambda: ["prefill", "decode"])
     replicated: bool = True
+    per_rank: bool = False   # op hook: key carries _rank{r} to avoid cross-rank merge
+    call_index: str = ""     # op hook: which calls to dump ("0-3" | "all")
 
     @property
     def is_layer_scoped(self) -> bool:
-        return "{L}" in self.id or "{L}" in self.module
+        return "{L}" in self.id or "{L}" in self.module or "{L}" in self.op
+
+    @property
+    def is_op_hook(self) -> bool:
+        return bool(self.op)
 
 
 @dataclass
 class HookSpec:
     architecture: str
     hook_points: List[HookPoint]  # already expanded (one per layer where applicable)
+    modifiers: List[dict] = field(default_factory=list)  # [{target, action, ...}] patches
 
     def for_phase(self, phase: str) -> List[HookPoint]:
         return [p for p in self.hook_points if phase in p.phases]
 
 
 def _parse_point(raw: dict) -> HookPoint:
-    capture = raw.get("capture", "output")
-    phases = raw.get("phases", ["prefill", "decode"])
-    replicated = raw.get("replicated", True)
     return HookPoint(
         id=raw["id"],
-        module=raw["module"],
-        capture=capture,
-        phases=phases,
-        replicated=replicated,
+        module=raw.get("module", ""),
+        op=raw.get("op", ""),
+        capture=raw.get("capture", "output"),
+        phases=raw.get("phases", ["prefill", "decode"]),
+        replicated=raw.get("replicated", True),
+        per_rank=raw.get("per_rank", False),
+        call_index=raw.get("call_index", ""),
     )
 
 
@@ -62,9 +70,12 @@ def _expand_point(point: HookPoint, num_layers: int) -> List[HookPoint]:
         HookPoint(
             id=point.id.replace("{L}", str(L)),
             module=point.module.replace("{L}", str(L)),
+            op=point.op.replace("{L}", str(L)),
             capture=point.capture,
             phases=list(point.phases),
             replicated=point.replicated,
+            per_rank=point.per_rank,
+            call_index=point.call_index,
         )
         for L in range(num_layers)
     ]
@@ -118,4 +129,5 @@ def load_hook_spec(path: str, num_layers: int,
     for p in merged:
         expanded.extend(_expand_point(p, num_layers))
 
-    return HookSpec(architecture=architecture, hook_points=expanded)
+    modifiers = raw.get("modifiers", [])
+    return HookSpec(architecture=architecture, hook_points=expanded, modifiers=modifiers)
