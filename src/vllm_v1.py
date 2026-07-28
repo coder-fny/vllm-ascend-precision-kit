@@ -17,7 +17,8 @@ _STASH: dict = {}          # {stage: {name: cpu_tensor}}
 _STAGE: list = ["prefill"]
 _STEP: list = [0]          # forward counter (legacy, not used for stage)
 _DECODE_COUNT: list = [0]  # decode step counter (reset on each prefill)
-_PROMPT_LEN: list = [0]    # original prompt length (for extended-prefill decode detection)
+_PROMPT_LEN: list = [0]
+_FORCED_DECODE_STEP: list = [-1]  # >=0 = forced decode mode (stage = decode/step_{N})    # original prompt length (for extended-prefill decode detection)
 
 
 def reset():
@@ -42,17 +43,29 @@ def set_prompt_len(n):
     _PROMPT_LEN[0] = n
 
 
+def set_forced_decode_step(step):
+    """Set forced decode step (generate count). When >=0, stage detection
+    ignores seq_len and uses this step directly — needed for large prompts
+    where vllm chunked prefill makes seq_len < prompt_len on later generates."""
+    _FORCED_DECODE_STEP[0] = step
+
+
 def set_stage_by_input(tensor):
     """Determine the dump stage from the input tensor shape.
 
-    Two modes:
-    1. True decode (seq_len == 1): standard vllm decode forward.
-    2. Extended prefill (seq_len > prompt_len): vllm V1 forced decode via
-       multiple generate(prompt + ref[:i+1], max_tokens=1). The extended
-       prefill's last token processes ref_tokens[i] with the cached KV from
-       the prefix — numerically equivalent to a decode step.
+    Three modes:
+    1. Forced decode mode (_FORCED_DECODE_STEP >= 0): stage = decode/step_{N},
+       set by run_forced_decode per generate call. Needed for large prompts
+       where chunked prefill breaks seq_len-based detection.
+    2. True decode (seq_len == 1): standard vllm decode forward.
+    3. Extended prefill (seq_len > prompt_len): vllm V1 forced decode via
+       multiple generate(prompt + ref[:i+1], max_tokens=1).
     """
     import torch
+    # forced decode mode: stage set by generate count, not seq_len
+    if _FORCED_DECODE_STEP[0] >= 0:
+        _STAGE[0] = f"decode/step_{_FORCED_DECODE_STEP[0]}"
+        return
     if not isinstance(tensor, torch.Tensor) or tensor.dim() < 1:
         return
     seq_len = tensor.shape[0]
@@ -102,6 +115,12 @@ def get() -> dict:
 
 def w_reset(m):
     """Reset the stash (runs in each worker)."""
+    reset()
+
+
+def w_set_forced_decode_step(m, step):
+    """Set forced decode step in each worker (for large prompt chunked prefill)."""
+    set_forced_decode_step(step)
     reset()
 
 

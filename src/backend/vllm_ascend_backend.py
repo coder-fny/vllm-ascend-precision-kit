@@ -198,7 +198,9 @@ class VllmAscendBackend(InferenceBackend):
         ref_tokens[i] with the cached KV — numerically equivalent to a decode step.
 
         The stage hook detects extended prefills (seq_len > prompt_len) and tags
-        them as decode/step_{seq_len - prompt_len - 1}.
+        them as decode/step_{seq_len - prompt_len - 1}. For large prompts where
+        vllm chunked prefill makes seq_len < prompt_len, we set forced_decode_step
+        per generate call (stage = decode/step_{i} regardless of seq_len).
         """
         from vllm import SamplingParams, TokensPrompt
         from .. import vllm_v1
@@ -218,8 +220,12 @@ class VllmAscendBackend(InferenceBackend):
         for i, tok in enumerate(ref):
             accumulated.append(int(tok))
             tp = TokensPrompt(prompt_token_ids=accumulated)
+            # Set forced decode step (generate count) — chunked-prefill safe
+            self._llm.apply_model(functools.partial(vllm_v1.w_set_forced_decode_step, step=i))
             out = self._llm.generate([tp], sp)
             results.append(out[0])
+        # Reset forced decode mode
+        self._llm.apply_model(functools.partial(vllm_v1.w_set_forced_decode_step, step=-1))
         return results
 
     # ------------------------------------------------------------------
