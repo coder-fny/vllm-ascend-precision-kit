@@ -39,7 +39,7 @@ def main():
 
     # 1. load fixed input (from the other side's dump)
     fixed = torch.load(args.fixed_input, map_location="cpu", weights_only=False)[args.fixed_key]
-    print(f"[fixed-op] fixed input: {args.fixed_key} shape={list(fixed.shape)} norm={fixed.norm().item():.4f}")
+    print(f"[fixed-op] fixed input: {args.fixed_key} shape={list(fixed.shape)} dtype={fixed.dtype}")
 
     # 2. load model
     from vllm import LLM, SamplingParams
