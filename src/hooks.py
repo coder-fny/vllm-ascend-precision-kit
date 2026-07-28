@@ -150,8 +150,16 @@ class HookRegistry:
                 t = None
                 if capture == "output":
                     t = out[0] if isinstance(out, tuple) else out
-                elif args:
-                    t = args[0]
+                else:  # input: first tensor in args or kwargs (op may use all kwargs)
+                    for a in (args if isinstance(args, tuple) else ()):
+                        if isinstance(a, torch.Tensor):
+                            t = a
+                            break
+                    if t is None:
+                        for v in (kwargs.values() if isinstance(kwargs, dict) else ()):
+                            if isinstance(v, torch.Tensor):
+                                t = v
+                                break
                 if isinstance(t, torch.Tensor) and sink is not None:
                     key = f"{pid}_{cnt}"
                     if per_rank:
