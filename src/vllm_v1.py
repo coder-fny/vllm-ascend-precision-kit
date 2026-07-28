@@ -53,36 +53,35 @@ def set_forced_decode_step(step):
 def set_stage_by_input(tensor):
     """Determine the dump stage from the input tensor shape.
 
-    Three modes:
-    1. Forced decode mode (_FORCED_DECODE_STEP >= 0): stage = decode/step_{N},
-       set by run_forced_decode per generate call. Needed for large prompts
-       where chunked prefill breaks seq_len-based detection.
-    2. True decode (seq_len == 1): standard vllm decode forward.
-    3. Extended prefill (seq_len > prompt_len): vllm V1 forced decode via
-       multiple generate(prompt + ref[:i+1], max_tokens=1).
+    Uses _DECODE_COUNT (incremented per generate call) for forced decode:
+    - seq_len > prompt_len: first generate (extended prefill) → decode/step_0
+    - seq_len < prompt_len (chunked prefill, large prompt): subsequent generates
+      → decode/step_{_DECODE_COUNT}, count bumped per forward
+    - seq_len == 1: true decode → decode/step_{_DECODE_COUNT}
+    - seq_len > 1, no prompt_len: original prefill
     """
     import torch
-    # forced decode mode: stage set by generate count, not seq_len
-    if _FORCED_DECODE_STEP[0] >= 0:
-        _STAGE[0] = f"decode/step_{_FORCED_DECODE_STEP[0]}"
-        return
     if not isinstance(tensor, torch.Tensor) or tensor.dim() < 1:
         return
     seq_len = tensor.shape[0]
     plen = _PROMPT_LEN[0]
     if plen > 0 and seq_len > plen:
-        # Extended prefill: last token is the decode step
+        # First generate (extended prefill): decode/step_0
         step = seq_len - plen - 1
         _STAGE[0] = f"decode/step_{step}"
+        _DECODE_COUNT[0] = step + 1  # next generate = step+1
+    elif plen > 0 and seq_len <= plen and seq_len > 1:
+        # Subsequent generates (chunked prefill): decode/step_{count}
+        _STAGE[0] = f"decode/step_{_DECODE_COUNT[0]}"
+        _DECODE_COUNT[0] += 1
     elif seq_len > 1:
-        # Original prefill
+        # Original prefill (no prompt_len set)
         _STAGE[0] = "prefill"
         _DECODE_COUNT[0] = 0
     elif seq_len == 1:
         # True decode forward
-        n = _DECODE_COUNT[0]
+        _STAGE[0] = f"decode/step_{_DECODE_COUNT[0]}"
         _DECODE_COUNT[0] += 1
-        _STAGE[0] = f"decode/step_{n}"
 
 
 def add(stage: str, name: str, tensor):
