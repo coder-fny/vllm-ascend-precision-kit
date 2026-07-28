@@ -31,12 +31,10 @@ overrides:
       hook_points:
         - {id: "layers.{L}.mlp_out", module: "model.layers.{L}.block_sparse_moe", capture: output, replicated: true}
         - {id: "layers.{L}.router.out", module: "model.layers.{L}.block_sparse_moe.gate", capture: output, replicated: true}
-        # op hook: dump gmm1+swiglu fused op I/O (input = expert dispatch token,
-        # output = swiglu_out = down_proj input). Comparing input vs output cosine
-        # isolates the op: if input matches but output diverges => op itself is
-        # the root cause (not topk routing or dispatch differences).
-        # per_rank: key carries _rank{r} to avoid cross-rank merge order corruption.
-        # call_index: first 4 calls (layer 0-1 experts).
+        # op hook: dump npu_dynamic_quant input (post-routing float hidden_states)
+        # + gmm1+swiglu I/O. If dynquant_in differs, divergence is in routing
+        # dispatch (MoEInitRouting), not the quant/op.
+        - {id: "expert_dynquant_in", op: "vllm_ascend.device.device_op.DeviceOperator.npu_dynamic_quant", capture: input,  call_index: "0-7"}
         - {id: "expert_swiglu_in",  op: "vllm_ascend.device.device_op.DeviceOperator.npu_grouped_matmul_swiglu_quant", capture: input,  call_index: "0-7"}
         - {id: "expert_swiglu_out", op: "vllm_ascend.device.device_op.DeviceOperator.npu_grouped_matmul_swiglu_quant", capture: output, call_index: "0-7"}
 
