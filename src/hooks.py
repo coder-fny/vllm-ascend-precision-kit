@@ -150,7 +150,7 @@ class HookRegistry:
                 t = None
                 if capture == "output":
                     t = out[0] if isinstance(out, tuple) else out
-                else:  # input: dump x (first tensor) + x_scale (if present)
+                else:  # input: first tensor in args or kwargs
                     for a in (args if isinstance(args, tuple) else ()):
                         if isinstance(a, torch.Tensor):
                             t = a
@@ -160,15 +160,6 @@ class HookRegistry:
                             if isinstance(v, torch.Tensor):
                                 t = v
                                 break
-                    # also dump x_scale (pertoken_scale) — needed for fixed-input
-                    # single-op verification (x + x_scale must be fixed together)
-                    if isinstance(kwargs, dict) and "x_scale" in kwargs and isinstance(kwargs["x_scale"], torch.Tensor):
-                        xs = kwargs["x_scale"]
-                        xkey = f"{key}_xscale" if per_rank else f"{pid}_{cnt}_xscale"
-                        if per_rank:
-                            xkey = f"{pid}_{cnt}_xscale_rank{rank}"
-                        _sync_npu()
-                        sink(stage_fn(), xkey, xs.detach().cpu().clone())
                 if isinstance(t, torch.Tensor) and sink is not None:
                     key = f"{pid}_{cnt}"
                     if per_rank:
@@ -179,6 +170,12 @@ class HookRegistry:
                         key = f"{key}_rank{rank}"
                     _sync_npu()
                     sink(stage_fn(), key, t.detach().cpu().clone())
+                    # also dump x_scale (pertoken_scale) — needed for fixed-input
+                    # single-op verification (x + x_scale must be fixed together)
+                    if capture == "input" and isinstance(kwargs, dict) and "x_scale" in kwargs and isinstance(kwargs["x_scale"], torch.Tensor):
+                        xkey = f"{key}_xscale"
+                        _sync_npu()
+                        sink(stage_fn(), xkey, kwargs["x_scale"].detach().cpu().clone())
             state["cnt"] += 1
             return out
 
