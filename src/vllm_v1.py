@@ -238,3 +238,51 @@ def w_logits(m, final_norm):
         return None
     return out.detach().cpu()
 
+
+# --- Fixed-input single-op verification ---
+# Patch gmm1+swiglu op to use a fixed input (from the other side's dump),
+# run prefill, capture output. Compares: same input → different output = op bug.
+
+_FIXED_OP_OUT = [None]  # captured output of the fixed-input op call
+
+
+def w_fixed_op_patch(m, fixed_input, call_index=0):
+    """Patch npu_grouped_matmul_swiglu_quant to replace x with fixed_input
+    on call_index. Captures the output for later retrieval.
+
+    Picklable: top-level + functools.partial(fixed_input=tensor, call_index=int).
+    Runs in each worker via apply_model.
+    """
+    import torch
+    try:
+        from vllm_ascend.device.device_op import DeviceOperator
+    except Exception:
+        print("[fixed-op] DeviceOperator not found", flush=True)
+        return
+    orig = DeviceOperator.npu_grouped_matmul_swiglu_quant
+    state = {"cnt": 0}
+
+    def patched(*a, **kw):
+        if state["cnt"] == call_index:
+            # replace x (first tensor arg/kwarg) with fixed input
+            if "x" in kw:
+                kw["x"] = fixed_input.to(kw["x"].device)
+            elif a and isinstance(a[0], torch.Tensor):
+                a = (fixed_input.to(a[0].device),) + a[1:]
+            out = orig(*a, **kw)
+            hs = out[0] if isinstance(out, tuple) else out
+            _FIXED_OP_OUT[0] = hs.detach().cpu().clone()
+            print(f"[fixed-op] call {call_index}: output shape={list(_FIXED_OP_OUT[0].shape)}", flush=True)
+        else:
+            out = orig(*a, **kw)
+        state["cnt"] += 1
+        return out
+
+    DeviceOperator.npu_grouped_matmul_swiglu_quant = patched
+    print(f"[fixed-op] patched (call_index={call_index})", flush=True)
+
+
+def w_get_fixed_op_out(m):
+    """Retrieve the fixed-input op output from worker."""
+    return _FIXED_OP_OUT[0]
+
