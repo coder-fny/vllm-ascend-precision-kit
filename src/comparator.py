@@ -297,29 +297,8 @@ class PrecisionComparator:
         lines.append(f"  {'Stage':<{stage_w}s} {'CosSim':>9s} {'normR':>7s} {'maxAbs':>11s} {'meanAbs':>11s} {'maxRel':>9s} "
                      f"{'Res':>4s}  {label_a:<{name_w}s} | {label_b}")
         all_passed = True
-        # Find first and last FAIL; show from first FAIL to last FAIL + 10 rows.
-        # Truncates long PASS prefix and suffix — only shows the divergence region.
-        first_fail_idx = -1
-        last_fail_idx = -1
-        for i, c in enumerate(comparisons):
+        for c in comparisons:
             all_passed = all_passed and c["passed"]
-            if not c["passed"]:
-                if first_fail_idx < 0:
-                    first_fail_idx = i
-                last_fail_idx = i
-        if first_fail_idx < 0:
-            # all PASS — show everything
-            show_from = 0
-            show_until = len(comparisons)
-        else:
-            show_from = first_fail_idx
-            show_until = min(last_fail_idx + 11, len(comparisons))
-        prefix_truncated = show_from > 0
-        suffix_truncated = show_until < len(comparisons)
-        if prefix_truncated:
-            lines.append(f"  ... ({show_from} rows before first FAIL truncated, all PASS)")
-        for i in range(show_from, show_until):
-            c = comparisons[i]
             status = f"{_color(c['passed'])}{'PASS' if c['passed'] else 'FAIL'}{_RESET}"
             cos = c["cosine_sim"]
             cos_s = f"{cos:.5f}" if cos == cos else "nan"
@@ -330,8 +309,6 @@ class PrecisionComparator:
             maxr = c.get("max_rel_diff", float("nan"))
             lines.append(f"  {c['stage']:<{stage_w}s} {cos_s:>9s} {nr_s:>7s} {maxa:>11.3e} "
                          f"{meana:>11.3e} {maxr:>9.2e} {status}  {c['name_a']:<{name_w}s} | {c['name_b']}")
-        if suffix_truncated:
-            lines.append(f"  ... ({len(comparisons) - show_until} rows after last FAIL truncated, all PASS)")
         lines.append("")
         verdict = (f"  {_GREEN}{_BOLD}ALL GATHERED-TENSOR CHECKS PASSED{_RESET}" if all_passed
                    else f"  {_RED}{_BOLD}SOME GATHERED-TENSOR CHECKS FAILED{_RESET}")
