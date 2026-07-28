@@ -246,12 +246,12 @@ def w_logits(m, final_norm):
 _FIXED_OP_OUT = [None]  # captured output of the fixed-input op call
 
 
-def w_fixed_op_patch(m, fixed_input, call_index=0):
-    """Patch npu_grouped_matmul_swiglu_quant to replace x with fixed_input
-    on call_index. Captures the output for later retrieval.
+def w_fixed_op_patch(m, fixed_input, fixed_xscale=None, call_index=0):
+    """Patch npu_grouped_matmul_swiglu_quant to replace x (and x_scale if provided)
+    with fixed inputs on call_index. Captures the output for later retrieval.
 
-    Picklable: top-level + functools.partial(fixed_input=tensor, call_index=int).
-    Runs in each worker via apply_model.
+    Both x (int8 quantized) and x_scale (pertoken_scale) must be fixed together
+    — they're a pair from npu_dynamic_quant, mismatched sizes cause aclnn errors.
     """
     import torch
     try:
@@ -264,11 +264,14 @@ def w_fixed_op_patch(m, fixed_input, call_index=0):
 
     def patched(*a, **kw):
         if state["cnt"] == call_index:
-            # replace x (first tensor arg/kwarg) with fixed input
+            # replace x with fixed input
             if "x" in kw:
                 kw["x"] = fixed_input.to(kw["x"].device)
             elif a and isinstance(a[0], torch.Tensor):
                 a = (fixed_input.to(a[0].device),) + a[1:]
+            # replace x_scale with fixed (must match x's per-token scale)
+            if fixed_xscale is not None and "x_scale" in kw:
+                kw["x_scale"] = fixed_xscale.to(kw["x_scale"].device)
             out = orig(*a, **kw)
             hs = out[0] if isinstance(out, tuple) else out
             _FIXED_OP_OUT[0] = hs.detach().cpu().clone()
@@ -279,7 +282,7 @@ def w_fixed_op_patch(m, fixed_input, call_index=0):
         return out
 
     DeviceOperator.npu_grouped_matmul_swiglu_quant = patched
-    print(f"[fixed-op] patched (call_index={call_index})", flush=True)
+    print(f"[fixed-op] patched (call_index={call_index}, xscale={'yes' if fixed_xscale is not None else 'no'})", flush=True)
 
 
 def w_get_fixed_op_out(m):

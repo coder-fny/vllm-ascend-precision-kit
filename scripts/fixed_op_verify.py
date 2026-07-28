@@ -37,9 +37,16 @@ def main():
     ap.add_argument("--quantization", default="ascend")
     args = ap.parse_args()
 
-    # 1. load fixed input (from the other side's dump)
-    fixed = torch.load(args.fixed_input, map_location="cpu", weights_only=False)[args.fixed_key]
+    # 1. load fixed input (x + x_scale) from the other side's dump
+    dump_data = torch.load(args.fixed_input, map_location="cpu", weights_only=False)
+    fixed = dump_data[args.fixed_key]
+    fixed_xscale_key = args.fixed_key + "_xscale"
+    fixed_xscale = dump_data.get(fixed_xscale_key)
     print(f"[fixed-op] fixed input: {args.fixed_key} shape={list(fixed.shape)} dtype={fixed.dtype}")
+    if fixed_xscale is not None:
+        print(f"[fixed-op] fixed xscale: {fixed_xscale_key} shape={list(fixed_xscale.shape)} dtype={fixed_xscale.dtype}")
+    else:
+        print(f"[fixed-op] WARNING: no xscale found ({fixed_xscale_key}), op may fail with size mismatch")
 
     # 2. load model
     from vllm import LLM, SamplingParams
@@ -53,6 +60,7 @@ def main():
 
     llm.apply_model(functools.partial(w_fixed_op_patch,
                                       fixed_input=fixed,
+                                      fixed_xscale=fixed_xscale,
                                       call_index=args.call_index))
 
     # 4. run prefill (triggers op — patched call uses fixed input)

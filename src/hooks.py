@@ -150,7 +150,7 @@ class HookRegistry:
                 t = None
                 if capture == "output":
                     t = out[0] if isinstance(out, tuple) else out
-                else:  # input: first tensor in args or kwargs (op may use all kwargs)
+                else:  # input: dump x (first tensor) + x_scale (if present)
                     for a in (args if isinstance(args, tuple) else ()):
                         if isinstance(a, torch.Tensor):
                             t = a
@@ -160,6 +160,15 @@ class HookRegistry:
                             if isinstance(v, torch.Tensor):
                                 t = v
                                 break
+                    # also dump x_scale (pertoken_scale) — needed for fixed-input
+                    # single-op verification (x + x_scale must be fixed together)
+                    if isinstance(kwargs, dict) and "x_scale" in kwargs and isinstance(kwargs["x_scale"], torch.Tensor):
+                        xs = kwargs["x_scale"]
+                        xkey = f"{key}_xscale" if per_rank else f"{pid}_{cnt}_xscale"
+                        if per_rank:
+                            xkey = f"{pid}_{cnt}_xscale_rank{rank}"
+                        _sync_npu()
+                        sink(stage_fn(), xkey, xs.detach().cpu().clone())
                 if isinstance(t, torch.Tensor) and sink is not None:
                     key = f"{pid}_{cnt}"
                     if per_rank:
