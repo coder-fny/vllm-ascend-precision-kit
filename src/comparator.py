@@ -86,10 +86,13 @@ def _stage_sort_key(stage: str):
 def _module_exec_key(name: str):
     import re
     # expert_swiglu_in/out_N_rankR → layer N (op hook associates with layer N,
-    # sorts before mlp_out which is pos 19; expert_swiglu is pos 14)
-    m_esw = re.match(r"expert_swiglu_(?:in|out)_(\d+)_rank\d+", name)
-    if m_esw:
-        return (int(m_esw.group(1)), 14)
+    # sorts before mlp_out which is pos 19). in before out (13.5 < 14).
+    m_esw_in = re.match(r"expert_swiglu_in_(\d+)_rank\d+", name)
+    if m_esw_in:
+        return (int(m_esw_in.group(1)), 13.5)
+    m_esw_out = re.match(r"expert_swiglu_out_(\d+)_rank\d+", name)
+    if m_esw_out:
+        return (int(m_esw_out.group(1)), 14)
     m = re.match(r"layers\.(\d+)\.(.+)$", name)
     if not m:
         # non-layer points (e.g. expert_swiglu_out op hooks): check _STAGE_ORDER
@@ -233,14 +236,12 @@ class PrecisionComparator:
                     "norm_reldiff": nm["rel_diff"],
                     "passed": cos_ok and norm_ok,
                 })
-        # Sort by: stage, then execution order (ln1_in → ... → mlp_out → ...).
-        # Within the same module (e.g. expert_swiglu_N's 8 ranks), FAIL before
-        # PASS, then cosine ascending (worst rank first).
+        # Sort by: stage, then execution order (ln1_in → ... → expert_swiglu_in
+        # → expert_swiglu_out → mlp_out → ...). Within same module, rank order
+        # (rank0, rank1, ... — stable sort preserves gather order).
         results.sort(key=lambda c: (
             _stage_sort_key(c["stage"]),
-            _module_exec_key(c["name_a"]),  # execution order (primary)
-            0 if not c["passed"] else 1,    # within same module: FAIL first
-            c["cosine_sim"],               # within same passed: low cosine first
+            _module_exec_key(c["name_a"]),
         ))
         return results
 
