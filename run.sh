@@ -41,5 +41,9 @@ if [ -n "$VA_DIR" ] && [ -d "$VA_DIR/_cann_ops_custom/vendors/custom_transformer
     echo "[run.sh] custom op lib paths added to LD_LIBRARY_PATH"
 fi
 
-# --- 3. Run the tool ---
-exec python3 "$(dirname "$0")/run_precision_compare.py" "$@"
+# --- 3. Run the tool (or any .py script if first arg ends with .py) ---
+if [ -n "$1" ] && [[ "$1" == *.py ]]; then
+    exec python3 "$1" "${@:2}"
+else
+    exec python3 "$(dirname "$0")/run_precision_compare.py" "$@"
+fi
