@@ -12,7 +12,7 @@ from typing import Dict
 
 import torch
 
-MAX_TENSOR_ELEMENTS = 10_000_000
+MAX_TENSOR_ELEMENTS = 100_000_000
 
 
 def tensor_stats(t: torch.Tensor) -> Dict:

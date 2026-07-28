@@ -345,11 +345,14 @@ class VllmAscendBackend(InferenceBackend):
             if len(parts) == 1:
                 dump_mgr.add(stage, name, parts[0])
                 continue
-            # Replicated tensors are (near-)identical across ranks (tolerant of
-            # tiny bf16 all-reduce ordering diffs); sharded tensors differ a lot.
+            # Replicated tensors are (near-)identical across ranks; sharded differ.
+            # Use dtype-aware tolerance: int8 can differ by ±1 unit (quantization
+            # rounding), float by bf16 all-reduce ordering (~1e-3).
             base = parts[0].float()
+            is_int8 = parts[0].dtype == torch.int8
+            atol = 1.0 if is_int8 else 1e-3
             is_replicated = all(
-                torch.allclose(base, p.float(), atol=1e-3, rtol=1e-3)
+                torch.allclose(base, p.float(), atol=atol, rtol=atol)
                 for p in parts[1:])
             if is_replicated:
                 dump_mgr.add(stage, name, parts[0])
