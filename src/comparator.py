@@ -85,6 +85,11 @@ def _stage_sort_key(stage: str):
 
 def _module_exec_key(name: str):
     import re
+    # expert_swiglu_in/out_N_rankR → layer N (op hook associates with layer N,
+    # sorts before mlp_out which is pos 19; expert_swiglu is pos 14)
+    m_esw = re.match(r"expert_swiglu_(?:in|out)_(\d+)_rank\d+", name)
+    if m_esw:
+        return (int(m_esw.group(1)), 14)
     m = re.match(r"layers\.(\d+)\.(.+)$", name)
     if not m:
         # non-layer points (e.g. expert_swiglu_out op hooks): check _STAGE_ORDER
@@ -228,9 +233,14 @@ class PrecisionComparator:
                     "norm_reldiff": nm["rel_diff"],
                     "passed": cos_ok and norm_ok,
                 })
-        # Sort by execution order: stage (prefill -> decode/step_N) then module
-        # (ln1_in -> q_proj -> ... -> mlp_out -> final_norm -> logits).
-        results.sort(key=lambda c: (_stage_sort_key(c["stage"]), _module_exec_key(c["name_a"])))
+        # Sort by: stage (prefill -> decode/step_N), then FAIL before PASS,
+        # then cosine ascending (worst first), then execution order as tiebreak.
+        results.sort(key=lambda c: (
+            _stage_sort_key(c["stage"]),
+            0 if not c["passed"] else 1,    # FAIL first
+            c["cosine_sim"],               # low cosine first
+            _module_exec_key(c["name_a"]), # execution order tiebreak
+        ))
         return results
 
     def _discover_stages(self, dump_dir: str, world_size: int) -> List[str]:
