@@ -35,7 +35,16 @@ def main():
     ap.add_argument("--tp", type=int, default=8)
     ap.add_argument("--call-index", type=int, default=0, help="Which op call to replace (0=layer 0)")
     ap.add_argument("--quantization", default="ascend")
+    ap.add_argument("--model-yaml", default=None, help="Model yaml to read prompt from (must match dump)")
     args = ap.parse_args()
+
+    # read prompt from yaml (must match the dump's prompt for same token count)
+    prompt = "test"
+    if args.model_yaml:
+        import yaml
+        with open(args.model_yaml) as f:
+            model_yaml = yaml.safe_load(f)
+        prompt = model_yaml.get("prompt", "test")
 
     # 1. load fixed input (x + x_scale) from the other side's dump
     dump_data = torch.load(args.fixed_input, map_location="cpu", weights_only=False)
@@ -64,7 +73,8 @@ def main():
                                       call_index=args.call_index))
 
     # 4. run prefill (triggers op — patched call uses fixed input)
-    llm.generate(["test"], SamplingParams(temperature=0.0, max_tokens=1))
+    #    Must use the SAME prompt as the dump (for matching token counts)
+    llm.generate([prompt], SamplingParams(temperature=0.0, max_tokens=1))
 
     # 5. retrieve patched op output
     outs = llm.apply_model(w_get_fixed_op_out)
@@ -76,9 +86,11 @@ def main():
     # 6. compare with the other side's output
     compare = torch.load(args.compare_with, map_location="cpu", weights_only=False)[args.compare_key]
     import torch.nn.functional as F
-    cos = F.cosine_similarity(out.reshape(1, -1), compare.reshape(1, -1)).item()
-    maxdiff = (out - compare).abs().max().item()
-    norm_ratio = out.norm().item() / compare.norm().item()
+    out_f = out.float()
+    compare_f = compare.float()
+    cos = F.cosine_similarity(out_f.reshape(1, -1), compare_f.reshape(1, -1)).item()
+    maxdiff = (out_f - compare_f).abs().max().item()
+    norm_ratio = out_f.norm().item() / compare_f.norm().item()
 
     print(f"\n{'='*60}")
     print(f"  FIXED-INPUT OP VERIFICATION")
