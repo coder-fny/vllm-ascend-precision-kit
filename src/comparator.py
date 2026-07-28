@@ -233,13 +233,14 @@ class PrecisionComparator:
                     "norm_reldiff": nm["rel_diff"],
                     "passed": cos_ok and norm_ok,
                 })
-        # Sort by: stage (prefill -> decode/step_N), then FAIL before PASS,
-        # then cosine ascending (worst first), then execution order as tiebreak.
+        # Sort by: stage, then execution order (ln1_in → ... → mlp_out → ...).
+        # Within the same module (e.g. expert_swiglu_N's 8 ranks), FAIL before
+        # PASS, then cosine ascending (worst rank first).
         results.sort(key=lambda c: (
             _stage_sort_key(c["stage"]),
-            0 if not c["passed"] else 1,    # FAIL first
-            c["cosine_sim"],               # low cosine first
-            _module_exec_key(c["name_a"]), # execution order tiebreak
+            _module_exec_key(c["name_a"]),  # execution order (primary)
+            0 if not c["passed"] else 1,    # within same module: FAIL first
+            c["cosine_sim"],               # within same passed: low cosine first
         ))
         return results
 
