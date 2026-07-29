@@ -62,7 +62,7 @@ def build_parser():
         description="vllm-ascend inference precision debugging (transformers vs vllm-ascend, or vllm-ascend across versions)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--mode", choices=["dump", "compare", "single-op"], required=True)
+    parser.add_argument("--mode", choices=["dump", "compare", "single-op", "trace"], required=True)
     parser.add_argument("--model", help="Model name -> reads models/<model>.yaml")
     parser.add_argument("--output-dir", default="/tmp/vllm_precision")
 
@@ -124,6 +124,8 @@ def main():
         _run_dump(args, cfg)
     elif args.mode == "compare":
         _run_compare(args, cfg)
+    elif args.mode == "trace":
+        _run_trace(args, cfg)
     elif args.mode == "single-op":
         _run_single_op(args, cfg)
 
@@ -196,6 +198,37 @@ def _run_compare(args, cfg):
     print(f"\n{color}{_BOLD}RESULT: {verdict}{_RESET}")
     sys.exit(0 if all_passed else 1)
 
+
+
+def _run_trace(args, cfg):
+    """Run one forward with op tracer to discover all fused op call paths."""
+    from .tracer import OpTracer
+    backend = _make_backend(args.side, args.vllm_version, cfg)
+    config = _backend_config(args, cfg)
+    backend.load_model(config)
+    model = backend.get_model()
+    if model is None:
+        # vllm V1: install tracer via apply_model in workers
+        tracer = OpTracer()
+        def w_install(m):
+            tracer.install()
+        def w_uninstall(m):
+            tracer.uninstall()
+        def w_report(m):
+            tracer.report()
+        backend._llm.apply_model(w_install)
+        backend.run_prefill(backend.encode(args.prompt or 'test'))
+        backend._llm.apply_model(w_uninstall)
+        backend._llm.apply_model(w_report)
+    else:
+        tracer = OpTracer()
+        tracer.install()
+        try:
+            backend.run_prefill(backend.encode(args.prompt or 'test'))
+        finally:
+            tracer.uninstall()
+        tracer.report()
+    print('[trace] done')
 
 def _run_single_op(args, cfg):
     if not args.op or not args.input_dump:

@@ -233,6 +233,53 @@ class HookRegistry:
         fused._kv_w = kv_w
         fused.forward = types.MethodType(_unfused_forward, fused)
 
+
+    def _auto_register_module_hooks(self):
+        """Auto-register forward hooks on ALL leaf nn.Modules with parameters."""
+        import torch.nn as nn
+        INTERESTING_NAMES = {
+            'Linear', 'RMSNorm', 'LayerNorm', 'Embedding',
+            'ReplicatedLinear', 'ColumnParallelLinear', 'RowParallelLinear',
+            'QKVParallelLinear', 'MergedColumnParallelLinear',
+            'MiniMaxText01RMSNormTP',
+        }
+        registered = 0
+        for name, module in self.model.named_modules():
+            if len(list(module.children())) > 0:
+                continue
+            if not list(module.parameters()):
+                continue
+            class_name = type(module).__name__
+            if class_name not in INTERESTING_NAMES:
+                continue
+            if any(name == p.module for p in self.spec.hook_points):
+                continue
+            in_key = name + '.in'
+            out_key = name + '.out'
+            h_in = module.register_forward_pre_hook(self._make_auto_pre_hook(in_key))
+            h_out = module.register_forward_hook(self._make_auto_forward_hook(out_key))
+            self._handles.append(h_in)
+            self._handles.append(h_out)
+            registered += 1
+        if registered:
+            print(f'[Hooks] auto-registered {registered} module hooks', flush=True)
+
+    def _make_auto_pre_hook(self, key):
+        def hook(module, args):
+            a = args[0] if isinstance(args, tuple) and args else args
+            if isinstance(a, torch.Tensor) and self.sink is not None:
+                _sync_npu()
+                self.sink(self._stage(), key, a.detach())
+        return hook
+
+    def _make_auto_forward_hook(self, key):
+        def hook(module, inputs, outputs):
+            out = outputs[0] if isinstance(outputs, tuple) else outputs
+            if isinstance(out, torch.Tensor) and self.sink is not None:
+                _sync_npu()
+                self.sink(self._stage(), key, out.detach())
+        return hook
+
     def register(self) -> List:
         """Register hooks for all spec points matching the current phase.
 
@@ -262,6 +309,8 @@ class HookRegistry:
                 h = module.register_forward_hook(self._make_output_forward_hook(point.id))
             self._handles.append(h)
             registered += 1
+        if getattr(self.spec, "auto_module_hooks", False):
+            self._auto_register_module_hooks()
         print(f"[Hooks] phase={self.phase}: registered {registered} hooks"
               f" ({missing} spec points not found on model, skipped)")
         return self._handles
