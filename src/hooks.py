@@ -234,86 +234,6 @@ class HookRegistry:
         fused.forward = types.MethodType(_unfused_forward, fused)
 
 
-    def _auto_register_module_hooks(self):
-        """Auto-register forward hooks on leaf nn.Modules (Linear/RMSNorm/...).
-
-        Filters out routed-expert internals (module path contains '.experts.')
-        — on the HF side these are 256+ individual expert Linear leaves whose
-        forward is bypassed by the fused op (dead hooks, ~32k on MoE). On the
-        vllm side FusedMoE has no per-expert leaves so the filter is a no-op.
-        Prints the registered list (count by class + sample names) so the user
-        can see exactly what is hooked.
-        """
-        # Match by class-name substring so both stock vllm (QKVParallelLinear,
-        # RowParallelLinear, ...) and vllm-ascend (AscendQKVParallelLinear,
-        # AscendRMSNorm, AscendVocabParallelEmbedding, ...) classes are caught.
-        # Exclude *LinearMethod (the quant_method child sub-module) to avoid
-        # double-hooking the linear + its quant method.
-        INTERESTING_SUBSTR = ("Linear", "RMSNorm", "LayerNorm", "Embedding", "LMHead")
-        SKIP_SUBSTR = '.experts.'  # routed-expert ModuleList internals
-        explicit = {p.module for p in self.spec.hook_points}
-        from collections import Counter
-        registered = []
-        skipped_expert = 0
-        skipped_explicit = 0
-        interesting_leaves = []
-        for name, module in self.model.named_modules():
-            # NOTE: do NOT require leaf modules — vllm Linears carry a
-            # `quant_method` child sub-module so they aren't leaves. The class
-            # filter is enough: containers (ModuleList/decoder-layer) and
-            # quant_method children don't match INTERESTING_SUBSTR.
-            # W8A8 quantized linears store weights as buffers (not nn.Parameter),
-            # so include buffer-only modules too.
-            if not list(module.parameters()) and not list(module.buffers()):
-                continue
-            cls = type(module).__name__
-            if "Method" in cls or not any(s in cls for s in INTERESTING_SUBSTR):
-                continue
-            interesting_leaves.append((name, type(module).__name__))
-            if name in explicit:
-                skipped_explicit += 1
-                continue
-            if SKIP_SUBSTR in name:
-                skipped_expert += 1
-                continue
-            in_key = name + '.in'
-            out_key = name + '.out'
-            self._handles.append(
-                module.register_forward_pre_hook(self._make_auto_pre_hook(in_key)))
-            self._handles.append(
-                module.register_forward_hook(self._make_auto_forward_hook(out_key)))
-            registered.append((name, type(module).__name__))
-        from collections import Counter
-        all_by_class = Counter(cls for _, cls in interesting_leaves)
-        reg_by_class = Counter(cls for _, cls in registered)
-        print(f'[Hooks] auto_module_hooks: {len(interesting_leaves)} interesting leaf '
-              f'modules -> registered {len(registered)}, '
-              f'skipped {skipped_explicit} (already in spec) + '
-              f'{skipped_expert} (routed-expert internals)', flush=True)
-        print(f'  interesting leaves by class: {dict(all_by_class)}', flush=True)
-        if reg_by_class:
-            print(f'  registered by class: {dict(reg_by_class)}', flush=True)
-            for name, cls in registered[:20]:
-                print(f'    {name}  ({cls})', flush=True)
-            if len(registered) > 20:
-                print(f'    ... ({len(registered) - 20} more)', flush=True)
-
-    def _make_auto_pre_hook(self, key):
-        def hook(module, args):
-            a = args[0] if isinstance(args, tuple) and args else args
-            if isinstance(a, torch.Tensor) and self.sink is not None:
-                _sync_npu()
-                self.sink(self._stage(), key, a.detach())
-        return hook
-
-    def _make_auto_forward_hook(self, key):
-        def hook(module, inputs, outputs):
-            out = outputs[0] if isinstance(outputs, tuple) else outputs
-            if isinstance(out, torch.Tensor) and self.sink is not None:
-                _sync_npu()
-                self.sink(self._stage(), key, out.detach())
-        return hook
-
     def register(self) -> List:
         """Register hooks for all spec points matching the current phase.
 
@@ -343,8 +263,6 @@ class HookRegistry:
                 h = module.register_forward_hook(self._make_output_forward_hook(point.id))
             self._handles.append(h)
             registered += 1
-        if getattr(self.spec, "auto_module_hooks", False):
-            self._auto_register_module_hooks()
         print(f"[Hooks] phase={self.phase}: registered {registered} hooks"
               f" ({missing} spec points not found on model, skipped)")
         return self._handles

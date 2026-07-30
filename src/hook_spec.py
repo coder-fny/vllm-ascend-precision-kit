@@ -44,7 +44,6 @@ class HookSpec:
     architecture: str
     hook_points: List[HookPoint]  # already expanded (one per layer where applicable)
     modifiers: List[dict] = field(default_factory=list)  # [{target, action, ...}] patches
-    auto_module_hooks: bool = False  # auto-register on all Linear/RMSNorm/Embedding leaf modules
 
     def for_phase(self, phase: str) -> List[HookPoint]:
         return [p for p in self.hook_points if phase in p.phases]
@@ -131,5 +130,4 @@ def load_hook_spec(path: str, num_layers: int,
         expanded.extend(_expand_point(p, num_layers))
 
     modifiers = raw.get("modifiers", [])
-    auto_module_hooks = raw.get("auto_module_hooks", False)
-    return HookSpec(architecture=architecture, hook_points=expanded, modifiers=modifiers, auto_module_hooks=auto_module_hooks)
+    return HookSpec(architecture=architecture, hook_points=expanded, modifiers=modifiers)

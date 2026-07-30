@@ -247,8 +247,8 @@ def _print_trace_report(calls, arch, modules):
         underlying impls that DeviceOperator.* wraps), paired input+output.
       - module hooks (module: ...) from the module scan, layer-scoped names
         collapsed to {L}, paired input+output.
-    This unifies module + op hook discovery into one editable yaml (replaces
-    the runtime auto_module_hooks flag for visibility/editability).
+    This unifies module + op hook discovery into one editable yaml (module hooks
+    are discovered + emitted here, not auto-registered at runtime).
     """
     from collections import defaultdict
     import os
