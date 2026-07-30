@@ -376,3 +376,37 @@ def w_uninstall_trace(m):
             pass
     _TRACE_ORIGS.clear()
 
+
+def filter_interesting_modules(named_modules):
+    """Filter model.named_modules() to INTERESTING leaves (Linear/RMSNorm/
+    Embedding/...), returning [(name, class_name), ...].
+
+    Substring class match so Ascend-prefixed classes (AscendQKVParallelLinear,
+    AscendRMSNorm, ...) are caught; skip routed-expert internals (`.experts.`);
+    skip param/buffer-less modules; don't require leaf since vllm Linears carry
+    a quant_method child. Shared by w_scan_modules (worker) and the HF trace
+    path (main process).
+    """
+    INTERESTING_SUBSTR = ("Linear", "RMSNorm", "LayerNorm", "Embedding", "LMHead")
+    SKIP_SUBSTR = ".experts."
+    out = []
+    for name, module in named_modules:
+        if not (list(module.parameters()) or list(module.buffers())):
+            continue
+        cls = type(module).__name__
+        if "Method" in cls or not any(s in cls for s in INTERESTING_SUBSTR):
+            continue
+        if SKIP_SUBSTR in name:
+            continue
+        out.append((name, cls))
+    return out
+
+
+def w_scan_modules(m):
+    """Scan the worker's model for INTERESTING nn.Module leaves, returning
+    [(name, class_name), ...] for the unified trace yaml. Picklable return
+    (list of (str, str)); apply_model returns one per TP rank.
+    """
+    return filter_interesting_modules(m.named_modules())
+
+
