@@ -245,7 +245,8 @@ def _run_trace(args, cfg):
     could never return to the main process.
     """
     backend = _make_backend(args.side, args.vllm_version, cfg)
-    config = _backend_config(args, cfg)
+    from .runner import DumpRunner
+    config = DumpRunner(args, cfg, backend)._backend_config()
     backend.load_model(config)
     model = backend.get_model()
     if model is None:
