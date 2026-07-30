@@ -200,34 +200,73 @@ def _run_compare(args, cfg):
 
 
 
+def _print_trace_report(calls):
+    """Print discovered op call paths + suggested op-hook yaml.
+
+    ``calls``: {op_name: [(caller_loc, [shapes...]), ...]}.
+    """
+    from collections import defaultdict
+    sep = "=" * 60
+    print("")
+    print(sep)
+    print("  OP TRACE REPORT - discovered " + str(len(calls)) + " unique ops")
+    print(sep)
+    for name in sorted(calls):
+        clist = calls[name]
+        callers = defaultdict(int)
+        for caller_loc, shapes in clist:
+            callers[caller_loc] += 1
+        print("")
+        print("  " + name + " (" + str(len(clist)) + " calls)")
+        for caller in sorted(callers):
+            short = caller.split("/")[-1] if "/" in caller else caller
+            print("    " + short + " x" + str(callers[caller]))
+        if clist:
+            _, shapes = clist[0]
+            if shapes:
+                print("    input shapes: " + str(shapes))
+    print("")
+    print(sep)
+    print("")
+    print("  Suggested op hook yaml entries:")
+    for name in sorted(calls):
+        short = name.split(".")[-1]
+        print('    - {id: "trace_' + short + '", op: "' + name + '", capture: output, call_index: "0-3"}')
+    print("")
+
+
 def _run_trace(args, cfg):
-    """Run one forward with op tracer to discover all fused op call paths."""
-    from .tracer import OpTracer
+    """Run one forward with op tracer to discover all fused op call paths.
+
+    vllm V1: the model lives in worker subprocesses, so the tracer must use
+    module-level state (vllm_v1._TRACE_CALLS) that survives across the
+    install / run / get / uninstall apply_model calls — a local OpTracer
+    closure would be pickled fresh to each worker and its recorded calls
+    could never return to the main process.
+    """
     backend = _make_backend(args.side, args.vllm_version, cfg)
     config = _backend_config(args, cfg)
     backend.load_model(config)
     model = backend.get_model()
     if model is None:
-        # vllm V1: install tracer via apply_model in workers
-        tracer = OpTracer()
-        def w_install(m):
-            tracer.install()
-        def w_uninstall(m):
-            tracer.uninstall()
-        def w_report(m):
-            tracer.report()
-        backend._llm.apply_model(w_install)
+        # vllm V1: install tracer via apply_model in workers (module-level state)
+        from . import vllm_v1
+        backend._llm.apply_model(vllm_v1.w_install_trace)
         backend.run_prefill(backend.encode(args.prompt or 'test'))
-        backend._llm.apply_model(w_uninstall)
-        backend._llm.apply_model(w_report)
+        trace_list = backend._llm.apply_model(vllm_v1.w_get_trace)
+        backend._llm.apply_model(vllm_v1.w_uninstall_trace)
+        # apply_model returns one entry per TP rank; rank0 is representative.
+        calls = trace_list[0] if isinstance(trace_list, list) else trace_list
+        _print_trace_report(calls)
     else:
+        from .tracer import OpTracer
         tracer = OpTracer()
         tracer.install()
         try:
             backend.run_prefill(backend.encode(args.prompt or 'test'))
         finally:
             tracer.uninstall()
-        tracer.report()
+        _print_trace_report(dict(tracer._calls))
     print('[trace] done')
 
 def _run_single_op(args, cfg):

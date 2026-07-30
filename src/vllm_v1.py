@@ -289,3 +289,90 @@ def w_get_fixed_op_out(m):
     """Retrieve the fixed-input op output from worker."""
     return _FIXED_OP_OUT[0]
 
+
+# --- Op trace discovery (module-level state, picklable via apply_model) ---
+# Records calls to torch_npu.npu_* / DeviceOperator.* / torch.ops._C_ascend.*
+# during one forward, so the main process can discover fused-op call paths
+# (e.g. which function quantizes the routed-expert input). The install/run/get/
+# uninstall calls are separate apply_model invocations; module-level state here
+# survives across them in the persistent worker process (same pattern as _STASH).
+_TRACE_CALLS: dict = {}   # {op_full_name: [(caller_loc, [shapes...]), ...]}
+_TRACE_ORIGS: list = []   # [(parent, attr, orig_func), ...]
+
+
+def _trace_wrap(parent, attr, full_name):
+    import traceback
+    orig = getattr(parent, attr)
+
+    def wrapped(*args, **kwargs):
+        stack = traceback.extract_stack()
+        caller = stack[-2] if len(stack) >= 2 else stack[-1]
+        caller_loc = caller.filename + ":" + str(caller.lineno)
+        shapes = []
+        for a in args:
+            if hasattr(a, "shape") and len(shapes) < 4:
+                shapes.append(list(a.shape))
+        if isinstance(kwargs, dict):
+            for v in kwargs.values():
+                if hasattr(v, "shape") and len(shapes) < 4:
+                    shapes.append(list(v.shape))
+        _TRACE_CALLS.setdefault(full_name, []).append((caller_loc, shapes))
+        return orig(*args, **kwargs)
+
+    setattr(parent, attr, wrapped)
+    _TRACE_ORIGS.append((parent, attr, orig))
+
+
+def w_install_trace(m):
+    """Install op tracers in this worker (monkey-patch torch_npu /
+    DeviceOperator / torch.ops._C_ascend). Clears prior state."""
+    _TRACE_CALLS.clear()
+    _TRACE_ORIGS.clear()
+    try:
+        import torch_npu
+        for name in dir(torch_npu):
+            if name.startswith("npu_") and callable(getattr(torch_npu, name)):
+                _trace_wrap(torch_npu, name, "torch_npu." + name)
+    except Exception:
+        pass
+    try:
+        from vllm_ascend.device.device_op import DeviceOperator
+        for name in dir(DeviceOperator):
+            if not name.startswith("_") and callable(getattr(DeviceOperator, name)):
+                _trace_wrap(DeviceOperator, name, "DeviceOperator." + name)
+    except Exception:
+        pass
+    try:
+        import torch
+        for name in dir(torch.ops._C_ascend):
+            if name.startswith("_"):
+                continue
+            try:
+                fn = getattr(torch.ops._C_ascend, name)
+                if callable(fn):
+                    _trace_wrap(torch.ops._C_ascend, name, "torch.ops._C_ascend." + name)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    print("[trace] installed op tracers in worker", flush=True)
+
+
+def w_get_trace(m):
+    """Return this worker's recorded op calls.
+
+    Picklable: {op_name: [(caller_loc_str, shapes_list), ...]}.
+    apply_model returns one entry per TP rank; rank0 is representative.
+    """
+    return {k: list(v) for k, v in _TRACE_CALLS.items()}
+
+
+def w_uninstall_trace(m):
+    """Restore original ops in this worker."""
+    for parent, attr, orig in _TRACE_ORIGS:
+        try:
+            setattr(parent, attr, orig)
+        except Exception:
+            pass
+    _TRACE_ORIGS.clear()
+
