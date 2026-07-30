@@ -235,34 +235,55 @@ class HookRegistry:
 
 
     def _auto_register_module_hooks(self):
-        """Auto-register forward hooks on ALL leaf nn.Modules with parameters."""
-        import torch.nn as nn
+        """Auto-register forward hooks on leaf nn.Modules (Linear/RMSNorm/...).
+
+        Filters out routed-expert internals (module path contains '.experts.')
+        — on the HF side these are 256+ individual expert Linear leaves whose
+        forward is bypassed by the fused op (dead hooks, ~32k on MoE). On the
+        vllm side FusedMoE has no per-expert leaves so the filter is a no-op.
+        Prints the registered list (count by class + sample names) so the user
+        can see exactly what is hooked.
+        """
         INTERESTING_NAMES = {
             'Linear', 'RMSNorm', 'LayerNorm', 'Embedding',
             'ReplicatedLinear', 'ColumnParallelLinear', 'RowParallelLinear',
             'QKVParallelLinear', 'MergedColumnParallelLinear',
             'MiniMaxText01RMSNormTP',
         }
-        registered = 0
+        SKIP_SUBSTR = '.experts.'  # routed-expert ModuleList internals
+        explicit = {p.module for p in self.spec.hook_points}
+        registered = []
+        skipped_expert = 0
         for name, module in self.model.named_modules():
             if len(list(module.children())) > 0:
                 continue
             if not list(module.parameters()):
                 continue
-            class_name = type(module).__name__
-            if class_name not in INTERESTING_NAMES:
+            if type(module).__name__ not in INTERESTING_NAMES:
                 continue
-            if any(name == p.module for p in self.spec.hook_points):
+            if name in explicit:
+                continue
+            if SKIP_SUBSTR in name:
+                skipped_expert += 1
                 continue
             in_key = name + '.in'
             out_key = name + '.out'
-            h_in = module.register_forward_pre_hook(self._make_auto_pre_hook(in_key))
-            h_out = module.register_forward_hook(self._make_auto_forward_hook(out_key))
-            self._handles.append(h_in)
-            self._handles.append(h_out)
-            registered += 1
+            self._handles.append(
+                module.register_forward_pre_hook(self._make_auto_pre_hook(in_key)))
+            self._handles.append(
+                module.register_forward_hook(self._make_auto_forward_hook(out_key)))
+            registered.append((name, type(module).__name__))
         if registered:
-            print(f'[Hooks] auto-registered {registered} module hooks', flush=True)
+            from collections import Counter
+            by_class = Counter(cls for _, cls in registered)
+            print(f'[Hooks] auto-registered {len(registered)} module hooks '
+                  f'(skipped {skipped_expert} routed-expert internals)', flush=True)
+            for cls, n in sorted(by_class.items(), key=lambda x: -x[1]):
+                print(f'  {cls}: {n}', flush=True)
+            for name, cls in registered[:20]:
+                print(f'    {name}  ({cls})', flush=True)
+            if len(registered) > 20:
+                print(f'    ... ({len(registered) - 20} more)', flush=True)
 
     def _make_auto_pre_hook(self, key):
         def hook(module, args):
