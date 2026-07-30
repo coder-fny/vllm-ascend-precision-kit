@@ -34,7 +34,11 @@ overrides:
         # op hook: dump npu_dynamic_quant input (post-routing float hidden_states)
         # + gmm1+swiglu I/O. npu_dynamic_quant is called via torch_npu (in
         # token_dispatcher.py, during MoEInitRouting dispatch), NOT via DeviceOperator.
-        - {id: "expert_dynquant_in", op: "torch_npu.npu_dynamic_quant", capture: input,  call_index: "0-20"}
+        - {id: "expert_dynquant_in", op: "torch_npu.npu_dynamic_quant", capture: input,  call_index: "0-3"}
+        # init_routing I/O: input [605,3072] float -> output [4840,3072] dispatched.
+        # If input bit-identical but output differs => routing dispatch is the root cause.
+        - {id: "expert_init_routing_in",  op: "vllm_ascend.device.device_op.DeviceOperator.npu_moe_init_routing", capture: input,  call_index: "0-3"}
+        - {id: "expert_init_routing_out", op: "vllm_ascend.device.device_op.DeviceOperator.npu_moe_init_routing", capture: output, call_index: "0-3"}
         - {id: "expert_swiglu_in",  op: "vllm_ascend.device.device_op.DeviceOperator.npu_grouped_matmul_swiglu_quant", capture: input,  call_index: "0-3"}
         - {id: "expert_swiglu_out", op: "vllm_ascend.device.device_op.DeviceOperator.npu_grouped_matmul_swiglu_quant", capture: output, call_index: "0-3"}
 
