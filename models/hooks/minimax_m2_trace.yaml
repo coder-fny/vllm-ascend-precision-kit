@@ -14,47 +14,47 @@ overrides:
   vllm_ascend:
     "":
       hook_points:
-        - {id: "trace_dq_moe_gating_top_k_in",  op: "DeviceOperator.moe_gating_top_k", capture: input,  call_index: "0-3"}
-        - {id: "trace_dq_moe_gating_top_k_out", op: "DeviceOperator.moe_gating_top_k", capture: output, call_index: "0-3"}
-        - {id: "trace_dq_npu_grouped_matmul_gmm2_in",  op: "DeviceOperator.npu_grouped_matmul_gmm2", capture: input,  call_index: "0-3"}
-        - {id: "trace_dq_npu_grouped_matmul_gmm2_out", op: "DeviceOperator.npu_grouped_matmul_gmm2", capture: output, call_index: "0-3"}
-        - {id: "trace_dq_npu_grouped_matmul_swiglu_quant_in",  op: "DeviceOperator.npu_grouped_matmul_swiglu_quant", capture: input,  call_index: "0-3"}
-        - {id: "trace_dq_npu_grouped_matmul_swiglu_quant_out", op: "DeviceOperator.npu_grouped_matmul_swiglu_quant", capture: output, call_index: "0-3"}
-        - {id: "trace_dq_npu_moe_init_routing_in",  op: "DeviceOperator.npu_moe_init_routing", capture: input,  call_index: "0-3"}
-        - {id: "trace_dq_npu_moe_init_routing_out", op: "DeviceOperator.npu_moe_init_routing", capture: output, call_index: "0-3"}
-        - {id: "trace_dq_reshape_and_cache_in",  op: "DeviceOperator.reshape_and_cache", capture: input,  call_index: "0-3"}
-        - {id: "trace_dq_reshape_and_cache_out", op: "DeviceOperator.reshape_and_cache", capture: output, call_index: "0-3"}
-        - {id: "trace_tn_npu_dynamic_quant_in",  op: "torch_npu.npu_dynamic_quant", capture: input,  call_index: "0-3"}
-        - {id: "trace_tn_npu_dynamic_quant_out", op: "torch_npu.npu_dynamic_quant", capture: output, call_index: "0-3"}
-        - {id: "trace_tn_npu_fused_infer_attention_score_in",  op: "torch_npu.npu_fused_infer_attention_score", capture: input,  call_index: "0-3"}
-        - {id: "trace_tn_npu_fused_infer_attention_score_out", op: "torch_npu.npu_fused_infer_attention_score", capture: output, call_index: "0-3"}
-        - {id: "trace_tn_npu_grouped_matmul_in",  op: "torch_npu.npu_grouped_matmul", capture: input,  call_index: "0-3"}
-        - {id: "trace_tn_npu_grouped_matmul_out", op: "torch_npu.npu_grouped_matmul", capture: output, call_index: "0-3"}
-        - {id: "trace_tn_npu_moe_token_unpermute_in",  op: "torch_npu.npu_moe_token_unpermute", capture: input,  call_index: "0-3"}
-        - {id: "trace_tn_npu_moe_token_unpermute_out", op: "torch_npu.npu_moe_token_unpermute", capture: output, call_index: "0-3"}
-        - {id: "trace_tn_npu_quant_matmul_in",  op: "torch_npu.npu_quant_matmul", capture: input,  call_index: "0-3"}
-        - {id: "trace_tn_npu_quant_matmul_out", op: "torch_npu.npu_quant_matmul", capture: output, call_index: "0-3"}
-        - {id: "trace_tn_npu_rms_norm_in",  op: "torch_npu.npu_rms_norm", capture: input,  call_index: "0-3"}
-        - {id: "trace_tn_npu_rms_norm_out", op: "torch_npu.npu_rms_norm", capture: output, call_index: "0-3"}
-        - {id: "mod_lm_head_in",  module: "lm_head", capture: input}
-        - {id: "mod_lm_head_out", module: "lm_head", capture: output}
         - {id: "mod_model_embed_tokens_in",  module: "model.embed_tokens", capture: input}
         - {id: "mod_model_embed_tokens_out", module: "model.embed_tokens", capture: output}
-        - {id: "mod_model_layers__L__block_sparse_moe_gate_in",  module: "model.layers.{L}.block_sparse_moe.gate", capture: input}
-        - {id: "mod_model_layers__L__block_sparse_moe_gate_out", module: "model.layers.{L}.block_sparse_moe.gate", capture: output}
         - {id: "mod_model_layers__L__input_layernorm_in",  module: "model.layers.{L}.input_layernorm", capture: input}
         - {id: "mod_model_layers__L__input_layernorm_out", module: "model.layers.{L}.input_layernorm", capture: output}
-        - {id: "mod_model_layers__L__post_attention_layernorm_in",  module: "model.layers.{L}.post_attention_layernorm", capture: input}
-        - {id: "mod_model_layers__L__post_attention_layernorm_out", module: "model.layers.{L}.post_attention_layernorm", capture: output}
-        - {id: "mod_model_layers__L__self_attn_k_norm_in",  module: "model.layers.{L}.self_attn.k_norm", capture: input}
-        - {id: "mod_model_layers__L__self_attn_k_norm_out", module: "model.layers.{L}.self_attn.k_norm", capture: output}
-        - {id: "mod_model_layers__L__self_attn_o_proj_in",  module: "model.layers.{L}.self_attn.o_proj", capture: input}
-        - {id: "mod_model_layers__L__self_attn_o_proj_out", module: "model.layers.{L}.self_attn.o_proj", capture: output}
-        - {id: "mod_model_layers__L__self_attn_q_norm_in",  module: "model.layers.{L}.self_attn.q_norm", capture: input}
-        - {id: "mod_model_layers__L__self_attn_q_norm_out", module: "model.layers.{L}.self_attn.q_norm", capture: output}
         - {id: "mod_model_layers__L__self_attn_qkv_proj_in",  module: "model.layers.{L}.self_attn.qkv_proj", capture: input}
         - {id: "mod_model_layers__L__self_attn_qkv_proj_out", module: "model.layers.{L}.self_attn.qkv_proj", capture: output}
         - {id: "mod_model_layers__L__self_attn_rotary_emb_in",  module: "model.layers.{L}.self_attn.rotary_emb", capture: input}
         - {id: "mod_model_layers__L__self_attn_rotary_emb_out", module: "model.layers.{L}.self_attn.rotary_emb", capture: output}
+        - {id: "mod_model_layers__L__self_attn_q_norm_in",  module: "model.layers.{L}.self_attn.q_norm", capture: input}
+        - {id: "mod_model_layers__L__self_attn_q_norm_out", module: "model.layers.{L}.self_attn.q_norm", capture: output}
+        - {id: "mod_model_layers__L__self_attn_k_norm_in",  module: "model.layers.{L}.self_attn.k_norm", capture: input}
+        - {id: "mod_model_layers__L__self_attn_k_norm_out", module: "model.layers.{L}.self_attn.k_norm", capture: output}
+        - {id: "mod_model_layers__L__self_attn_o_proj_in",  module: "model.layers.{L}.self_attn.o_proj", capture: input}
+        - {id: "mod_model_layers__L__self_attn_o_proj_out", module: "model.layers.{L}.self_attn.o_proj", capture: output}
+        - {id: "mod_model_layers__L__post_attention_layernorm_in",  module: "model.layers.{L}.post_attention_layernorm", capture: input}
+        - {id: "mod_model_layers__L__post_attention_layernorm_out", module: "model.layers.{L}.post_attention_layernorm", capture: output}
+        - {id: "mod_model_layers__L__block_sparse_moe_gate_in",  module: "model.layers.{L}.block_sparse_moe.gate", capture: input}
+        - {id: "mod_model_layers__L__block_sparse_moe_gate_out", module: "model.layers.{L}.block_sparse_moe.gate", capture: output}
         - {id: "mod_model_norm_in",  module: "model.norm", capture: input}
         - {id: "mod_model_norm_out", module: "model.norm", capture: output}
+        - {id: "mod_lm_head_in",  module: "lm_head", capture: input}
+        - {id: "mod_lm_head_out", module: "lm_head", capture: output}
+        - {id: "trace_tn_npu_rms_norm_in",  op: "torch_npu.npu_rms_norm", capture: input,  call_index: "0-3"}
+        - {id: "trace_tn_npu_rms_norm_out", op: "torch_npu.npu_rms_norm", capture: output, call_index: "0-3"}
+        - {id: "trace_tn_npu_dynamic_quant_in",  op: "torch_npu.npu_dynamic_quant", capture: input,  call_index: "0-3"}
+        - {id: "trace_tn_npu_dynamic_quant_out", op: "torch_npu.npu_dynamic_quant", capture: output, call_index: "0-3"}
+        - {id: "trace_tn_npu_quant_matmul_in",  op: "torch_npu.npu_quant_matmul", capture: input,  call_index: "0-3"}
+        - {id: "trace_tn_npu_quant_matmul_out", op: "torch_npu.npu_quant_matmul", capture: output, call_index: "0-3"}
+        - {id: "trace_dq_reshape_and_cache_in",  op: "DeviceOperator.reshape_and_cache", capture: input,  call_index: "0-3"}
+        - {id: "trace_dq_reshape_and_cache_out", op: "DeviceOperator.reshape_and_cache", capture: output, call_index: "0-3"}
+        - {id: "trace_tn_npu_fused_infer_attention_score_in",  op: "torch_npu.npu_fused_infer_attention_score", capture: input,  call_index: "0-3"}
+        - {id: "trace_tn_npu_fused_infer_attention_score_out", op: "torch_npu.npu_fused_infer_attention_score", capture: output, call_index: "0-3"}
+        - {id: "trace_dq_moe_gating_top_k_in",  op: "DeviceOperator.moe_gating_top_k", capture: input,  call_index: "0-3"}
+        - {id: "trace_dq_moe_gating_top_k_out", op: "DeviceOperator.moe_gating_top_k", capture: output, call_index: "0-3"}
+        - {id: "trace_dq_npu_moe_init_routing_in",  op: "DeviceOperator.npu_moe_init_routing", capture: input,  call_index: "0-3"}
+        - {id: "trace_dq_npu_moe_init_routing_out", op: "DeviceOperator.npu_moe_init_routing", capture: output, call_index: "0-3"}
+        - {id: "trace_dq_npu_grouped_matmul_swiglu_quant_in",  op: "DeviceOperator.npu_grouped_matmul_swiglu_quant", capture: input,  call_index: "0-3"}
+        - {id: "trace_dq_npu_grouped_matmul_swiglu_quant_out", op: "DeviceOperator.npu_grouped_matmul_swiglu_quant", capture: output, call_index: "0-3"}
+        - {id: "trace_dq_npu_grouped_matmul_gmm2_in",  op: "DeviceOperator.npu_grouped_matmul_gmm2", capture: input,  call_index: "0-3"}
+        - {id: "trace_dq_npu_grouped_matmul_gmm2_out", op: "DeviceOperator.npu_grouped_matmul_gmm2", capture: output, call_index: "0-3"}
+        - {id: "trace_tn_npu_grouped_matmul_in",  op: "torch_npu.npu_grouped_matmul", capture: input,  call_index: "0-3"}
+        - {id: "trace_tn_npu_grouped_matmul_out", op: "torch_npu.npu_grouped_matmul", capture: output, call_index: "0-3"}
+        - {id: "trace_tn_npu_moe_token_unpermute_in",  op: "torch_npu.npu_moe_token_unpermute", capture: input,  call_index: "0-3"}
+        - {id: "trace_tn_npu_moe_token_unpermute_out", op: "torch_npu.npu_moe_token_unpermute", capture: output, call_index: "0-3"}
