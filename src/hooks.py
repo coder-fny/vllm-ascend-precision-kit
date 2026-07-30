@@ -244,24 +244,34 @@ class HookRegistry:
         Prints the registered list (count by class + sample names) so the user
         can see exactly what is hooked.
         """
-        INTERESTING_NAMES = {
-            'Linear', 'RMSNorm', 'LayerNorm', 'Embedding',
-            'ReplicatedLinear', 'ColumnParallelLinear', 'RowParallelLinear',
-            'QKVParallelLinear', 'MergedColumnParallelLinear',
-            'MiniMaxText01RMSNormTP',
-        }
+        # Match by class-name substring so both stock vllm (QKVParallelLinear,
+        # RowParallelLinear, ...) and vllm-ascend (AscendQKVParallelLinear,
+        # AscendRMSNorm, AscendVocabParallelEmbedding, ...) classes are caught.
+        # Exclude *LinearMethod (the quant_method child sub-module) to avoid
+        # double-hooking the linear + its quant method.
+        INTERESTING_SUBSTR = ("Linear", "RMSNorm", "LayerNorm", "Embedding", "LMHead")
         SKIP_SUBSTR = '.experts.'  # routed-expert ModuleList internals
         explicit = {p.module for p in self.spec.hook_points}
+        from collections import Counter
         registered = []
         skipped_expert = 0
+        skipped_explicit = 0
+        interesting_leaves = []
         for name, module in self.model.named_modules():
-            if len(list(module.children())) > 0:
+            # NOTE: do NOT require leaf modules — vllm Linears carry a
+            # `quant_method` child sub-module so they aren't leaves. The class
+            # filter is enough: containers (ModuleList/decoder-layer) and
+            # quant_method children don't match INTERESTING_SUBSTR.
+            # W8A8 quantized linears store weights as buffers (not nn.Parameter),
+            # so include buffer-only modules too.
+            if not list(module.parameters()) and not list(module.buffers()):
                 continue
-            if not list(module.parameters()):
+            cls = type(module).__name__
+            if "Method" in cls or not any(s in cls for s in INTERESTING_SUBSTR):
                 continue
-            if type(module).__name__ not in INTERESTING_NAMES:
-                continue
+            interesting_leaves.append((name, type(module).__name__))
             if name in explicit:
+                skipped_explicit += 1
                 continue
             if SKIP_SUBSTR in name:
                 skipped_expert += 1
@@ -273,13 +283,16 @@ class HookRegistry:
             self._handles.append(
                 module.register_forward_hook(self._make_auto_forward_hook(out_key)))
             registered.append((name, type(module).__name__))
-        if registered:
-            from collections import Counter
-            by_class = Counter(cls for _, cls in registered)
-            print(f'[Hooks] auto-registered {len(registered)} module hooks '
-                  f'(skipped {skipped_expert} routed-expert internals)', flush=True)
-            for cls, n in sorted(by_class.items(), key=lambda x: -x[1]):
-                print(f'  {cls}: {n}', flush=True)
+        from collections import Counter
+        all_by_class = Counter(cls for _, cls in interesting_leaves)
+        reg_by_class = Counter(cls for _, cls in registered)
+        print(f'[Hooks] auto_module_hooks: {len(interesting_leaves)} interesting leaf '
+              f'modules -> registered {len(registered)}, '
+              f'skipped {skipped_explicit} (already in spec) + '
+              f'{skipped_expert} (routed-expert internals)', flush=True)
+        print(f'  interesting leaves by class: {dict(all_by_class)}', flush=True)
+        if reg_by_class:
+            print(f'  registered by class: {dict(reg_by_class)}', flush=True)
             for name, cls in registered[:20]:
                 print(f'    {name}  ({cls})', flush=True)
             if len(registered) > 20:
