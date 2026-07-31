@@ -69,6 +69,15 @@ _STAGE_ORDER = [
     ("gate_proj", 15), ("up_proj", 16),
     ("down_proj.in", 17), ("down_proj.out", 18), ("down_proj", 17),
     ("mlp_out", 19),
+    # fused-op hooks (trace-generated, non-layer, sorted by first-call execution
+    # order so they interleave with module hooks at the matching execution point).
+    # ln1 op (rms_norm) → qkv quant/matmul → KV cache → attention → router →
+    # dispatch → expert gmm1(swiglu) → gmm2(down) → unpermute.
+    ("rms_norm", 0.5), ("dynamic_quant", 2.5), ("quant_matmul", 2.6),
+    ("reshape_and_cache", 8.5), ("fused_infer_attention", 9.5),
+    ("moe_gating_top_k", 12.5), ("moe_init_routing", 13.5),
+    ("grouped_matmul_swiglu", 14.5), ("grouped_matmul_gmm2", 18.5),
+    ("moe_token_unpermute", 19.5), ("grouped_matmul", 14.6),
 ]
 
 
@@ -95,11 +104,13 @@ def _module_exec_key(name: str):
         return (int(m_esw_out.group(1)), 14)
     m = re.match(r"layers\.(\d+)\.(.+)$", name)
     if not m:
-        # non-layer points (e.g. expert_swiglu_out op hooks): check _STAGE_ORDER
-        # first so they sort before final_norm/logits (op hooks belong to layers,
-        # not to the final output). Falls back to final_norm/logits/other at end.
+        # non-layer points (trace-generated op hooks like "trace_tn_npu_rms_norm_in",
+        # plus "expert_swiglu_*", "router.out"): match _STAGE_ORDER by SUBSTRING so
+        # the trace-tn/dq prefix doesn't break matching. Sorts to the op's execution
+        # point (interleaved with module hooks), before final_norm/logits.
+        low = name.lower()
         for kw, pos in _STAGE_ORDER:
-            if name.startswith(kw):
+            if kw in low:
                 return (1 << 29, pos)
         if name == "final_norm":
             return (1 << 30, 0)
