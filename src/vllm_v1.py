@@ -389,12 +389,16 @@ def filter_interesting_modules(named_modules):
     """
     INTERESTING_SUBSTR = ("Linear", "RMSNorm", "LayerNorm", "Embedding", "LMHead")
     SKIP_SUBSTR = ".experts."
+    SKIP_CLASS = ("Rotary",)  # AscendRotaryEmbedding matches "Embedding" but outputs
+                              # cos/sin tables, not activations -- not worth hooking
     out = []
     for name, module in named_modules:
         if not (list(module.parameters()) or list(module.buffers())):
             continue
         cls = type(module).__name__
         if "Method" in cls or not any(s in cls for s in INTERESTING_SUBSTR):
+            continue
+        if any(s in cls for s in SKIP_CLASS):
             continue
         if SKIP_SUBSTR in name:
             continue
