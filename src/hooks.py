@@ -36,6 +36,15 @@ def _resolve_op(op_path: str):
     monkey-patch (setattr parent.attr = wrapped) and restore on remove.
     """
     import importlib
+    # vllm-ascend 0.23+ has a circular import: importing device_op directly
+    # triggers ops/__init__ -> fused_moe -> experts_selector -> device_op (which
+    # is still initializing, so DeviceOperator class isn't defined yet). Importing
+    # ops.fused_moe.moe_mlp first lets ops/__init__ complete, breaking the cycle.
+    if "vllm_ascend.device" in op_path:
+        try:
+            import vllm_ascend.ops.fused_moe.moe_mlp  # noqa: F401
+        except Exception:
+            pass
     parts = op_path.split(".")
     mod = None
     split_idx = 0

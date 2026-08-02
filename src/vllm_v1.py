@@ -255,6 +255,7 @@ def w_fixed_op_patch(m, fixed_input, fixed_xscale=None, call_index=0):
     """
     import torch
     try:
+        import vllm_ascend.ops.fused_moe.moe_mlp  # noqa: F401  warm up ops/__init__
         from vllm_ascend.device.device_op import DeviceOperator
     except Exception:
         print("[fixed-op] DeviceOperator not found", flush=True)
@@ -336,6 +337,7 @@ def w_install_trace(m):
     except Exception:
         pass
     try:
+        import vllm_ascend.ops.fused_moe.moe_mlp  # noqa: F401  warm up ops/__init__
         from vllm_ascend.device.device_op import DeviceOperator
         for name in dir(DeviceOperator):
             if not name.startswith("_") and callable(getattr(DeviceOperator, name)):

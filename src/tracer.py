@@ -45,6 +45,7 @@ class OpTracer:
         except Exception:
             pass
         try:
+            import vllm_ascend.ops.fused_moe.moe_mlp  # noqa: F401  warm up ops/__init__
             from vllm_ascend.device.device_op import DeviceOperator
             for name in dir(DeviceOperator):
                 if not name.startswith("_") and callable(getattr(DeviceOperator, name)):
