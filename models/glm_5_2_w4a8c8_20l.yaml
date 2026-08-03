@@ -1,8 +1,7 @@
-# GLM-5.2 BF16 30-layer — vllm-ascend, TP=8, long medical prompt.
-
+# GLM-5.2 W4A8C8 20-layer — vllm-ascend, TP=8, medical prompt, enable_sparse_sfa_c8.
 model:
-  name: GLM-5.2-BF16-20L
-  hf_model_path: /a3_inference/itask/workdir/fny02324681/models/glm52_bf16_20l
+  name: GLM-5.2-W4A8C8-20L
+  hf_model_path: /a3_inference/itask/workdir/fny02324681/models/glm52_w4a8c8_20l
   architecture: glm
   trust_remote_code: true
 
@@ -10,12 +9,13 @@ precision:
   dtype: bfloat16
   attn_implementation: eager
   enforce_eager: true
-  quantization_config: null
+  quantization_config: ascend
   tp_size: 8
   dp_size: 1
   max_model_len: 4096
   enable_expert_parallel: false
-  additional_config: {}
+  additional_config:
+    enable_sparse_sfa_c8: true
 
 hook_spec: models/hooks/glm.yaml
 
