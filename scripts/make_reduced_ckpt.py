@@ -42,6 +42,10 @@ def main():
     # config (num_hidden_layers=N) + symlink non-weight files (tokenizer, etc.)
     cfg = json.load(open(os.path.join(src, "config.json")))
     cfg["num_hidden_layers"] = n
+    # GLM-5.2 has mlp_layer_types (per-layer: dense/sparse) that must match
+    # num_hidden_layers (transformers 5.14+ validates this). Truncate to N.
+    if "mlp_layer_types" in cfg and len(cfg["mlp_layer_types"]) > n:
+        cfg["mlp_layer_types"] = cfg["mlp_layer_types"][:n]
     json.dump(cfg, open(os.path.join(dst, "config.json"), "w"))
     for f in os.listdir(src):
         if f.endswith(".safetensors") or f.endswith(".index.json"):
