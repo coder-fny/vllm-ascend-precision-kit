@@ -1,5 +1,7 @@
-# GLM-5.2 BF16 (gold reference) — 10-layer reduced, transformers side.
+# GLM-5.2 BF16 (gold reference) — 10-layer, vllm-ascend side (bf16, no quant).
 # Compare target: bf16 gold vs W4A8/W4A8C8/W8A8 quantized (vllm-ascend).
+# Using vllm-ascend (not transformers) to avoid HF trust_remote_code mismatch
+# (kv_a_proj_with_mqa shape: ckpt 576 vs model 704).
 
 model:
   name: GLM-5.2-BF16-10L
@@ -13,9 +15,29 @@ precision:
   attn_implementation: eager
   enforce_eager: true
   quantization_config: null
-  tp_size: 1
+  tp_size: 2
   dp_size: 1
   max_model_len: 4096
+  enable_expert_parallel: false
+  additional_config: {}
+
+hook_spec: models/hooks/glm.yaml
+
+prompt: "The quick brown fox jumps over the lazy dog. The capital of France is"
+max_new_tokens: 8
+
+compare:
+  thresholds:
+    cosine: 0.95
+    abs_mean_rel_diff: 0.05
+    norm_rel_diff: 0.05
+
+output_dir: ./dumped
+
+env:
+  ASCEND_DEVICE_ID: "0,1"
+  VLLM_VERSION: "0.23.0"
+  VLLM_ALLOW_INSECURE_SERIALIZATION: "1"
 
 hook_spec: models/hooks/glm.yaml
 
