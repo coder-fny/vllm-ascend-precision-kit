@@ -5,10 +5,9 @@
 
 model:
   name: GLM-5.2-BF16-10L
-  hf_model_path: /home/admin/model-csi/models/modelhub_58600037_glm-5-2-133900141_20260714215107/model
+  hf_model_path: /a3_inference/itask/workdir/fny02324681/models/glm52_bf16_10l
   architecture: glm
   trust_remote_code: true
-  num_layers_override: 10
 
 precision:
   dtype: bfloat16
