@@ -15,7 +15,7 @@ precision:
   attn_implementation: eager
   enforce_eager: true
   quantization_config: null
-  tp_size: 2
+  tp_size: 4
   dp_size: 1
   max_model_len: 4096
   enable_expert_parallel: false
@@ -35,7 +35,7 @@ compare:
 output_dir: ./dumped
 
 env:
-  ASCEND_DEVICE_ID: "0,1"
+  ASCEND_DEVICE_ID: "0,1,2,3"
   VLLM_VERSION: "0.23.0"
   VLLM_ALLOW_INSECURE_SERIALIZATION: "1"
 
