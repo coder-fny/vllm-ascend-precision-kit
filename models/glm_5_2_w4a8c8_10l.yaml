@@ -1,0 +1,38 @@
+# GLM-5.2 W4A8C8 — 10-layer reduced, vllm-ascend side (enable_sparse_sfa_c8).
+# Compare: W4A8C8 vs W8A8/W4A8 (quant cross-compare), then vs bf16 gold.
+
+model:
+  name: GLM-5.2-W4A8C8-10L
+  hf_model_path: /a3_inference/itask/workdir/fny02324681/models/glm52_w4a8c8_10l
+  architecture: glm
+  trust_remote_code: true
+
+precision:
+  dtype: bfloat16
+  attn_implementation: eager
+  enforce_eager: true
+  quantization_config: ascend
+  tp_size: 1
+  dp_size: 1
+  max_model_len: 4096
+  enable_expert_parallel: false
+  additional_config:
+    enable_sparse_sfa_c8: true
+
+hook_spec: models/hooks/glm.yaml
+
+prompt: "The quick brown fox jumps over the lazy dog. The capital of France is"
+max_new_tokens: 8
+
+compare:
+  thresholds:
+    cosine: 0.95
+    abs_mean_rel_diff: 0.05
+    norm_rel_diff: 0.05
+
+output_dir: ./dumped
+
+env:
+  ASCEND_DEVICE_ID: "0"
+  VLLM_VERSION: "0.23.0"
+  VLLM_ALLOW_INSECURE_SERIALIZATION: "1"
