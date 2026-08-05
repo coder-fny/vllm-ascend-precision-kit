@@ -20,48 +20,53 @@ import argparse
 import json
 import os
 import re
+import shutil
 
 from safetensors import safe_open
 from safetensors.torch import save_file
 
 
 def layer_index(wname: str) -> int:
+    """Extract layer index from weight name. -1 = non-layer."""
     m = re.search(r"layers\.(\d+)\.", wname)
-    return int(m.group(1)) if m else -1   # -1 = non-layer (embed/norm/lm_head)
+    return int(m.group(1)) if m else -1
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--src", required=True, help="source model dir (full checkpoint)")
-    ap.add_argument("--dst", required=True, help="destination reduced-checkpoint dir")
-    ap.add_argument("--num-layers", type=int, required=True, help="keep first N layers")
-    args = ap.parse_args()
-    src, dst, n = args.src, args.dst, args.num_layers
+def build_reduced_ckpt(src: str, dst: str, n: int) -> dict:
+    """Build a reduced-layer checkpoint at dst, keeping first n layers.
+
+    Physically extracts weights (copy not symlink). Truncates config's
+    num_hidden_layers + mlp_layer_types. Copies tokenizer/non-weight files.
+    Prints progress. Returns stats dict.
+    """
     os.makedirs(dst, exist_ok=True)
 
-    # config (num_hidden_layers=N) + symlink non-weight files (tokenizer, etc.)
+    # config: num_hidden_layers=N + truncate mlp_layer_types
     cfg = json.load(open(os.path.join(src, "config.json")))
     cfg["num_hidden_layers"] = n
-    # GLM-5.2 has mlp_layer_types (per-layer: dense/sparse) that must match
-    # num_hidden_layers (transformers 5.14+ validates this). Truncate to N.
     if "mlp_layer_types" in cfg and len(cfg["mlp_layer_types"]) > n:
         cfg["mlp_layer_types"] = cfg["mlp_layer_types"][:n]
-    json.dump(cfg, open(os.path.join(dst, "config.json"), "w"))
-    for f in os.listdir(src):
-        if f.endswith(".safetensors") or f.endswith(".index.json"):
-            continue
-        d = os.path.join(dst, f)
-        if not os.path.exists(d):
-            os.symlink(os.path.join(src, f), d)
+    json.dump(cfg, open(os.path.join(dst, "config.json"), "w"), indent=2)
 
-    # auto-detect the safetensors index file (W8A8 uses quant_model_weights.safetensors.index.json)
+    # copy non-weight files (tokenizer etc.) — copy not symlink
+    for fn in os.listdir(src):
+        if fn.endswith(".safetensors") or fn.endswith(".index.json") or fn == "config.json":
+            continue
+        dst_fn = os.path.join(dst, fn)
+        if not os.path.exists(dst_fn):
+            shutil.copy2(os.path.join(src, fn), dst_fn)
+
+    # auto-detect safetensors index
     idx_name = next(f for f in os.listdir(src) if f.endswith(".index.json"))
     index = json.load(open(os.path.join(src, idx_name)))
     wm = index["weight_map"]
     keep = {w: sh for w, sh in wm.items() if layer_index(w) < n}
     proc = sorted(set(keep.values()))
-    print(f"processing {len(proc)} shards (of {len(set(wm.values()))}), {len(keep)} weights", flush=True)
+    total_shards = len(set(wm.values()))
+    print(f"[reduce] {src} -> {dst} | {n} layers | "
+          f"{len(proc)}/{total_shards} shards | {len(keep)} weights", flush=True)
 
+    # extract + write
     new_wm, total = {}, 0
     for i, sh in enumerate(proc):
         tensors = {}
@@ -70,16 +75,29 @@ def main():
                 if layer_index(wname) < n:
                     t = f.get_tensor(wname)
                     tensors[wname] = t
-                    total += t.numel() * t.element_size()   # bf16-safe (no .numpy())
+                    total += t.numel() * t.element_size()
         save_file(tensors, os.path.join(dst, sh))
         for wname in tensors:
             new_wm[wname] = sh
-        if (i + 1) % 10 == 0 or i == 0:
-            print(f"[{i+1}/{len(proc)}] {sh}: {len(tensors)} tensors", flush=True)
+        if (i + 1) % 10 == 0 or i == 0 or i == len(proc) - 1:
+            print(f"[reduce] [{i+1}/{len(proc)}] {sh}: {len(tensors)} tensors", flush=True)
 
     json.dump({"metadata": {"total_size": total}, "weight_map": new_wm},
               open(os.path.join(dst, idx_name), "w"))
-    print(f"DONE reduced ckpt at {dst} | {len(new_wm)} weights | {total/1e9:.1f}GB", flush=True)
+
+    size_gb = total / 1e9
+    print(f"[reduce] DONE: {n} layers, {len(new_wm)} weights, {size_gb:.1f}GB -> {dst}", flush=True)
+    return {"weights": len(new_wm), "shards_processed": len(proc),
+            "shards_total": total_shards, "size_gb": size_gb}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--src", required=True)
+    ap.add_argument("--dst", required=True)
+    ap.add_argument("--num-layers", type=int, required=True)
+    args = ap.parse_args()
+    build_reduced_ckpt(args.src, args.dst, args.num_layers)
 
 
 if __name__ == "__main__":
