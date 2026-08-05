@@ -48,6 +48,8 @@ class TransformersBackend(InferenceBackend):
         nlo = config.get("num_layers_override")
         if nlo:
             self._config.num_hidden_layers = int(nlo)
+            if hasattr(self._config, "mlp_layer_types") and len(self._config.mlp_layer_types) > int(nlo):
+                self._config.mlp_layer_types = self._config.mlp_layer_types[:int(nlo)]
             print(f"[transformers] num_layers_override={nlo} (loading first {nlo} layers)")
         self._messages = config.get("messages")
 

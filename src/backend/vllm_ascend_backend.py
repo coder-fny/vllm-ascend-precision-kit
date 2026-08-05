@@ -122,26 +122,18 @@ class VllmAscendBackend(InferenceBackend):
               f"tp={tp} quant={quant} max_model_len={max_model_len} layers={self.get_num_layers()}")
 
     def _make_reduced_dir(self, src: str, n: int) -> str:
-        """Auto-generate a reduced-layer model dir: copy config.json with
-        num_hidden_layers=n, symlink everything else (weights/tokenizer). vllm
-        loads the first n layers' weights; the rest in the checkpoint are
-        ignored (unmatched). Lets huge MoE models fit for pipeline testing."""
-        import json
-        import os
+        """Auto-generate a reduced-layer checkpoint: physically extract first N
+        layers' weights from source safetensors via build_reduced_ckpt. vllm's
+        GlmMoeDsa loader KeyErrors on extra layers so physical extraction needed."""
         import tempfile
+        import sys
+        import os
         d = tempfile.mkdtemp(prefix=f"reduced_{n}l_")
-        with open(os.path.join(src, "config.json")) as f:
-            cfg = json.load(f)
-        cfg["num_hidden_layers"] = n
-        with open(os.path.join(d, "config.json"), "w") as f:
-            json.dump(cfg, f)
-        for fn in os.listdir(src):
-            if fn == "config.json":
-                continue
-            try:
-                os.symlink(os.path.join(src, fn), os.path.join(d, fn))
-            except Exception:
-                pass
+        scripts_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        from make_reduced_ckpt import build_reduced_ckpt
+        build_reduced_ckpt(src, d, n)
         self._reduced_dir = d
         return d
 
