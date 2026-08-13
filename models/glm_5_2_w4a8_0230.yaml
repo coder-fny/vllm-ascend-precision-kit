@@ -1,0 +1,29 @@
+# GLM-5.2 W4A8 20-layer, vllm0230-5, cross-version 0.23 vs 0.26
+model:
+  name: GLM-5.2-W4A8-20L
+  hf_model_path: /a3_inference/itask/workdir/shared/models/glm-5.2-w4a8
+  architecture: glm
+  trust_remote_code: true
+  num_layers_override: 20
+precision:
+  dtype: bfloat16
+  attn_implementation: eager
+  enforce_eager: true
+  quantization_config: ascend
+  tp_size: 8
+  dp_size: 1
+  max_model_len: 4096
+  enable_expert_parallel: false
+  additional_config: {}
+hook_spec: models/hooks/glm.yaml
+prompt: "The quick brown fox jumps over the lazy dog. The capital of France is"
+max_new_tokens: 8
+compare:
+  thresholds:
+    cosine: 0.95
+    abs_mean_rel_diff: 0.05
+    norm_rel_diff: 0.05
+output_dir: ./dumped
+env:
+  ASCEND_DEVICE_ID: "0,1,2,3,4,5,6,7"
+  VLLM_ALLOW_INSECURE_SERIALIZATION: "1"
