@@ -109,6 +109,7 @@ class VllmAscendBackend(InferenceBackend):
             kwargs["quantization"] = quant if isinstance(quant, str) else None
         if max_model_len:
             kwargs["max_model_len"] = int(max_model_len)
+        kwargs["enable_chunked_prefill"] = False  # disable chunked prefill so full prompt is dumped
         if config.get("enable_expert_parallel"):
             kwargs["enable_expert_parallel"] = True
         add_cfg = config.get("additional_config")
