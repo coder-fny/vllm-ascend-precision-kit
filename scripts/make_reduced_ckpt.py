@@ -48,13 +48,16 @@ def build_reduced_ckpt(src: str, dst: str, n: int) -> dict:
         cfg["mlp_layer_types"] = cfg["mlp_layer_types"][:n]
     json.dump(cfg, open(os.path.join(dst, "config.json"), "w"), indent=2)
 
-    # copy non-weight files (tokenizer etc.) — copy not symlink
+    # copy non-weight files (tokenizer etc.) — copy not symlink, skip dirs
     for fn in os.listdir(src):
         if fn.endswith(".safetensors") or fn.endswith(".index.json") or fn == "config.json":
             continue
+        src_fn = os.path.join(src, fn)
+        if not os.path.isfile(src_fn):
+            continue
         dst_fn = os.path.join(dst, fn)
         if not os.path.exists(dst_fn):
-            shutil.copy2(os.path.join(src, fn), dst_fn)
+            shutil.copy2(src_fn, dst_fn)
 
     # auto-detect safetensors index
     idx_name = next(f for f in os.listdir(src) if f.endswith(".index.json"))
