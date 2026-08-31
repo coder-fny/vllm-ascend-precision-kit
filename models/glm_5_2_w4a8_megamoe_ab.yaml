@@ -1,19 +1,15 @@
-# GLM-5.2 W4A8, 20-layer — A/B precision for PR #15077 (Disable MegaMoE).
-#
-# EP-on + enable_fused_mc2=1 are required so that, with #15077 REVERTED,
-# use_cann_megamoe() returns True (CANN MegaMoE fused kernel). With #15077
-# APPLIED (return False), it falls back to the other fused path (MC2 /
-# grouped_matmul). Same input, same parallelism => isolates the MoE kernel.
-#
-# Toggle PR #15077 in vllm_ascend/ascend_forward_context.py between dumps:
+# GLM-5.2 W4A8, 20-layer (pre-built reduced ckpt) — A/B precision for PR #15077.
+# EP-on + enable_fused_mc2=1 so that with #15077 REVERTED, use_cann_megamoe()=True
+# (CANN MegaMoE fused kernel); with #15077 APPLIED (return False) -> MC2/grouped_matmul.
+# Pre-built 20-layer ckpt (v0.26.0/glm52_w4a8_20l) avoids per-run re-reduce.
+# Toggle #15077 in vllm_ascend/ascend_forward_context.py between dumps:
 #   state A (before): revert the `return False` line  (MegaMoE ON)
 #   state B (after) : current HEAD fa3537f92           (MegaMoE OFF)
 model:
   name: GLM-5.2-W4A8-MegaMoE-AB
-  hf_model_path: /a3_inference/itask/workdir/shared/models/glm-5.2-w4a8
+  hf_model_path: /a3_inference/itask/workdir/shared/fny02324681/GLM5.2_30ms/v0.26.0/glm52_w4a8_20l
   architecture: glm
   trust_remote_code: true
-  num_layers_override: 20
 precision:
   dtype: bfloat16
   attn_implementation: eager
