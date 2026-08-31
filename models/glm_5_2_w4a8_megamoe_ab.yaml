@@ -1,0 +1,39 @@
+# GLM-5.2 W4A8, 20-layer — A/B precision for PR #15077 (Disable MegaMoE).
+#
+# EP-on + enable_fused_mc2=1 are required so that, with #15077 REVERTED,
+# use_cann_megamoe() returns True (CANN MegaMoE fused kernel). With #15077
+# APPLIED (return False), it falls back to the other fused path (MC2 /
+# grouped_matmul). Same input, same parallelism => isolates the MoE kernel.
+#
+# Toggle PR #15077 in vllm_ascend/ascend_forward_context.py between dumps:
+#   state A (before): revert the `return False` line  (MegaMoE ON)
+#   state B (after) : current HEAD fa3537f92           (MegaMoE OFF)
+model:
+  name: GLM-5.2-W4A8-MegaMoE-AB
+  hf_model_path: /a3_inference/itask/workdir/shared/models/glm-5.2-w4a8
+  architecture: glm
+  trust_remote_code: true
+  num_layers_override: 20
+precision:
+  dtype: bfloat16
+  attn_implementation: eager
+  enforce_eager: true
+  quantization_config: ascend
+  tp_size: 8
+  dp_size: 1
+  max_model_len: 32768
+  enable_expert_parallel: true
+  additional_config:
+    enable_fused_mc2: 1
+hook_spec: models/hooks/glm.yaml
+prompt: "The quick brown fox jumps over the lazy dog. The capital of France is"
+max_new_tokens: 8
+compare:
+  thresholds:
+    cosine: 0.95
+    abs_mean_rel_diff: 0.05
+    norm_rel_diff: 0.05
+output_dir: ./dumped
+env:
+  ASCEND_DEVICE_ID: "0,1,2,3,4,5,6,7"
+  VLLM_ALLOW_INSECURE_SERIALIZATION: "1"
