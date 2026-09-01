@@ -17,7 +17,7 @@ Ascend NPU 容器内已装 `torch`+`torch_npu`(HCCL)、`transformers`、`vllm`+`
 
 ```bash
 # 1) 建配置：cp models/_template.yaml models/<m>.yaml，改 hf_model_path / architecture
-# 2) dump 一侧
+# 2) dump 一侧（或先 export VLLM_SRC=<vllm> VLLM_ASCEND_SRC=<vllm-ascend>，见 FAQ，之后省略 PYTHONPATH 前缀）
 PYTHONPATH=<vllm>:<vllm-ascend> bash run.sh --model <m> --mode dump \
     --side vllm_ascend --vllm-version 0.26.0 --phase prefill --output-dir dumped/runA
 # 3) 对比任意两个 dump 目录（两侧可同模型不同版本 / transformers vs vllm-ascend）
@@ -83,6 +83,20 @@ vllm-ascend V1 hooking（worker 子进程 `apply_model`）· 残差边界对齐�
 
 - 功能 commit 必须同步更新文档：CLI 新增 `--flag` → README + `_template.yaml`；yaml 新增字段 → `_template.yaml`；行为变更 → README + `CHANGELOG.md`。
 - 提交前跑 `python3 scripts/check_doc_drift.py`（解析 cli.py flag + config.py yaml 字段，核对在 README/`_template.yaml`；有遗漏 exit 1）。仓库自带 `.githooks/pre-commit`，clone 后 `git config core.hooksPath .githooks` 启用（WIP 可 `git commit --no-verify`）。
+
+## FAQ
+
+**Q: 每次都要 `PYTHONPATH=<vllm>:<vllm-ascend> bash run.sh ...` 吗？**
+不用。在 shell/profile 里 `export VLLM_SRC=<vllm> VLLM_ASCEND_SRC=<vllm-ascend>` 一次，之后直接 `bash run.sh ...`——run.sh 会把这两个**append**到 PYTHONPATH（保留你已有的 PYTHONPATH、不覆盖），再追加 CANN site-packages。仍可临时 `PYTHONPATH=... bash run.sh` 覆盖。
+
+**Q: 那 `vllm.versions.<ver>.pythonpath` 配置还需要吗？**
+单版本不需要（env var 够了，跳过 vllm.versions 即可）。它只用于**跨版本**：一个 yaml 里声明多个 vllm-ascend checkout 路径，用 `--vllm-version X` 选——此时 cli.py 把对应路径插到 sys.path 最前。`--vllm-version` 本身总是用来设 dump 目录标签（`vllm_ascend_v<ver>_ascend`），与 pythonpath 无关。
+
+**Q: 为什么 append 而非覆盖 PYTHONPATH？**
+保留你已有的 PYTHONPATH（其他工具/路径）。run.sh 只往末尾追加 vllm/vllm-ascend + CANN site-packages，且去重（已在则不加）。
+
+**Q: 纯 EP=8（无 DCP）prefill 报 triton slot-mapping 错？**
+需 `HAS_TRITON=True`（triton-ascend 可导入）。run.sh 已加 CANN site-packages；若 GPU `triton` 覆盖了 triton-ascend 的 `libtriton.so`（`triton._C.libtriton.ascend` 不可导入），重铺覆盖层：`pip install --force-reinstall --no-deps <triton_ascend wheel>`。
 
 ## 目录结构
 

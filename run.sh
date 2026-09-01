@@ -1,23 +1,22 @@
 #!/bin/bash
 # Wrapper for run_precision_compare.py.
-# Ensures CANN env is loaded + CANN python site-packages on PYTHONPATH (so
-# cann_ops_transformer / triton-ascend import and vllm sets HAS_TRITON=True,
-# required for the EP-on fused MoE / slot-mapping triton kernels) + vllm-ascend
-# custom op lib paths on LD_LIBRARY_PATH, then runs the tool.
+# Loads CANN env + APPENDS to PYTHONPATH (vllm/vllm-ascend from env vars +
+# CANN python site-packages for cann_ops_transformer/triton-ascend) + custom
+# op libs to LD_LIBRARY_PATH, then runs the tool.
 #
-# Usage:  PYTHONPATH=<vllm>:<vllm-ascend> bash run.sh [tool args...]
-#   PYTHONPATH=$SRC/vllm:$SRC_1/vllm-ascend bash run.sh \
-#       --model glm_5_2_w4a8_megamoe_ab --mode dump --side vllm_ascend \
-#       --vllm-version 0.26.0 --phase prefill --output-dir /tmp/dumpA
+# Usage:
+#   # one-time (shell/profile): export VLLM_SRC=<vllm> VLLM_ASCEND_SRC=<vllm-ascend>
+#   bash run.sh --model <m> --mode dump --side vllm_ascend --vllm-version 0.26.0 \
+#       --phase prefill --output-dir /tmp/dumpA
+#   # (or keep prefixing: PYTHONPATH=<vllm>:<vllm-ascend> bash run.sh ...)
 #
-# Why this exists:
-#  - aclnnXxx custom fused ops live in libcust_opapi.so
-#    (vllm_ascend/_cann_ops_custom/), NOT in CANN's libopapi.so.
-#  - cann_ops_transformer / triton-ascend ship in CANN's python site-packages;
-#    without it on PYTHONPATH, find_spec("cann_ops_transformer") fails and
-#    vllm sets HAS_TRITON=False (breaks EP-on fused MoE / slot-mapping kernels).
-#  - A login shell does not reliably source set_env.sh on every image, so we
-#    source it explicitly when ASCEND_TOOLKIT_HOME is unset.
+# PYTHONPATH is APPENDED — your existing PYTHONPATH is preserved. vllm/vllm-ascend
+# come from $VLLM_SRC/$VLLM_ASCEND_SRC (see FAQ in README); CANN site-packages is
+# auto-added so cann_ops_transformer/triton-ascend import and vllm sets
+# HAS_TRITON=True. Custom fused ops (aclnnXxx) live in vllm_ascend/_cann_ops_custom/
+# libcust_opapi.so, not CANN's libopapi.so — added to LD_LIBRARY_PATH below.
+# A login shell doesn't reliably source set_env.sh, so we source it explicitly
+# when ASCEND_TOOLKIT_HOME is unset.
 
 # --- 1. Ensure CANN env is loaded (source set_env.sh, don't rely on login shell) ---
 if [ -z "$ASCEND_TOOLKIT_HOME" ]; then
@@ -27,7 +26,16 @@ if [ -z "$ASCEND_TOOLKIT_HOME" ]; then
     done
 fi
 
-# --- 2. Add CANN python site-packages to PYTHONPATH (cann_ops_transformer / triton-ascend) ---
+# --- 2. Append user's vllm / vllm-ascend source (export VLLM_SRC / VLLM_ASCEND_SRC
+#         in shell/profile). Appends — preserves existing PYTHONPATH. Skipped if unset. ---
+for _p in "${VLLM_SRC:-}" "${VLLM_ASCEND_SRC:-}"; do
+    if [ -n "$_p" ]; then
+        case ":$PYTHONPATH:" in *":$_p:"*) ;; *)
+            export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$_p" ;; esac
+    fi
+done
+
+# --- 3. Add CANN python site-packages to PYTHONPATH (cann_ops_transformer / triton-ascend) ---
 for _cannpy in /usr/local/Ascend/cann-*/python/site-packages \
                 /usr/local/Ascend/ascend-toolkit/latest/python/site-packages; do
     if [ -d "$_cannpy" ]; then
@@ -36,7 +44,7 @@ for _cannpy in /usr/local/Ascend/cann-*/python/site-packages \
     fi
 done
 
-# --- 3. Add vllm-ascend custom op lib paths to LD_LIBRARY_PATH ---
+# --- 4. Add vllm-ascend custom op lib paths to LD_LIBRARY_PATH ---
 VA_DIR=$(python3 -c "
 import importlib.util, os
 s = importlib.util.find_spec('vllm_ascend')
@@ -51,16 +59,13 @@ if [ -n "$VA_DIR" ] && [ -d "$VA_DIR/_cann_ops_custom/vendors/custom_transformer
         "$CUSTOM/op_impl/ai_core/tbe/op_tiling/lib/linux/aarch64" \
         "$CUSTOM/op_impl/cpu/aicpu_kernel/impl"; do
         if [ -d "$d" ]; then
-            case ":$LD_LIBRARY_PATH:" in
-                *":$d:"*) ;;
-                *) export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$d" ;;
-            esac
+            case ":$LD_LIBRARY_PATH:" in *":$d:"*) ;; *) export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$d" ;; esac
         fi
     done
     echo "[run.sh] custom op lib paths added to LD_LIBRARY_PATH"
 fi
 
-# --- 4. Run the tool (or any .py script if first arg ends with .py) ---
+# --- 5. Run the tool (or any .py script if first arg ends with .py) ---
 if [ -n "$1" ] && [[ "$1" == *.py ]]; then
     exec python3 "$1" "${@:2}"
 else
