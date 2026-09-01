@@ -93,6 +93,8 @@ bash run.sh scripts/analyze_residual_diff.py ...   # 跑任意辅助脚本（带
 | `--tensor-rtol` | 单 tensor 相对容差（默认 5e-2） |
 
 > yaml 配置字段（model / precision / hook_spec / deterministic / sides / vllm.versions 等）全量见 `models/_template.yaml`（每字段注释）。
+>
+> **CLI 覆盖 yaml**：CLI flag 覆盖 yaml 同名字段——`--num-layers` > `num_layers_override`、`--tp` > `tp_size`、`--prompt` > `prompt`、`--output-dir` > `output_dir`。不传则用 yaml 默认（如 `glm_5_1.yaml` 默认 `num_layers_override: 2`，`--num-layers 20` 可临时覆盖）。两者不是重复，是「yaml 默认 + CLI 覆盖」的标准模式。
 
 ## 3. 经典工作流程
 
