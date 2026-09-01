@@ -1,29 +1,4 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-.eggs/
-
-# Dump data (regenerated per run)
+reduced_ckpts/
+kernel_meta/
 dumped/
-*.pt
-!data/*.pt
-
-# Data
-data/*.pt
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-logs/
+__pycache__/

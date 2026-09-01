@@ -124,19 +124,63 @@ class VllmAscendBackend(InferenceBackend):
               f"tp={tp} quant={quant} max_model_len={max_model_len} layers={self.get_num_layers()}")
 
     def _make_reduced_dir(self, src: str, n: int) -> str:
-        """Auto-generate a reduced-layer checkpoint: physically extract first N
-        layers' weights from source safetensors via build_reduced_ckpt. vllm's
-        GlmMoeDsa loader KeyErrors on extra layers so physical extraction needed."""
-        import tempfile
-        import sys
-        import os
-        d = tempfile.mkdtemp(prefix=f"reduced_{n}l_")
+        """Auto-generate a reduced-layer checkpoint (first N layers' weights).
+
+        Cached + persistent when a large writable FS is available: builds once
+        into <cache_root>/reduced_{n}l_<src_hash>/ and reuses it across runs (so
+        A/B dumps share one reduced ckpt; no per-run rebuild). Falls back to a
+        fresh temp dir (removed after the run) when only the small pod /tmp is
+        writable. Cache root preference: $PRECISION_KIT_REDUCED_DIR >
+        <kit>/reduced_ckpts > $TMPDIR.
+        """
+        import tempfile, sys, os, hashlib, shutil
         scripts_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts")
         if scripts_dir not in sys.path:
             sys.path.insert(0, scripts_dir)
         from make_reduced_ckpt import build_reduced_ckpt
+
+        src_hash = hashlib.md5(os.path.abspath(src).encode()).hexdigest()[:8]
+        name = f"reduced_{n}l_{src_hash}"
+        tmp_root = tempfile.gettempdir()
+        candidates = []
+        env_root = os.environ.get("PRECISION_KIT_REDUCED_DIR")
+        if env_root:
+            candidates.append(env_root)
+        candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "reduced_ckpts"))
+        candidates.append(tmp_root)
+        cache_root = tmp_root
+        for root in candidates:
+            try:
+                os.makedirs(root, exist_ok=True)
+                if os.access(root, os.W_OK):
+                    cache_root = root
+                    break
+            except OSError:
+                continue
+        persistent = cache_root is not tmp_root
+
+        if not persistent:
+            d = tempfile.mkdtemp(prefix=f"reduced_{n}l_")
+            print(f"[reduce] build {n}-layer ckpt -> {d} (temp; /tmp fallback)")
+            build_reduced_ckpt(src, d, n)
+            self._reduced_dir = d
+            self._reduced_dir_persistent = False
+            return d
+
+        d = os.path.join(cache_root, name)
+        if os.path.exists(os.path.join(d, ".reduced_ok")):
+            print(f"[reduce] reuse cached {n}-layer ckpt: {d}")
+            self._reduced_dir = d
+            self._reduced_dir_persistent = True
+            return d
+        if os.path.exists(d):
+            shutil.rmtree(d, ignore_errors=True)
+        os.makedirs(d, exist_ok=True)
+        print(f"[reduce] build {n}-layer ckpt -> {d} (cached, persistent)")
         build_reduced_ckpt(src, d, n)
+        open(os.path.join(d, ".reduced_ok"), "w").close()
         self._reduced_dir = d
+        self._reduced_dir_persistent = True
         return d
 
     def _get_model_inplace(self) -> Optional[nn.Module]:
@@ -381,8 +425,11 @@ class VllmAscendBackend(InferenceBackend):
             self._model = None
         except Exception:
             pass
-        # Clean up the auto-generated reduced-layer dir (symlinks + config).
-        if self._reduced_dir:
+        # Clean up the auto-generated reduced-layer dir, unless it is a
+        # persistent cache (reused across runs). Temp dirs (/tmp fallback) are
+        # removed; cached ones (<kit>/reduced_ckpts or $PRECISION_KIT_REDUCED_DIR)
+        # are kept for reuse.
+        if self._reduced_dir and not getattr(self, "_reduced_dir_persistent", False):
             try:
                 import shutil
                 shutil.rmtree(self._reduced_dir, ignore_errors=True)
