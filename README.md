@@ -191,8 +191,11 @@ vllm-ascend-precision-kit/
 **Q: 纯 EP=8（无 DCP）prefill 报 triton slot-mapping 错？**
 需 `HAS_TRITON=True`（triton-ascend 可导入）。run.sh 已加 CANN site-packages；若 GPU `triton` 覆盖了 triton-ascend 的 `libtriton.so`（`triton._C.libtriton.ascend` 不可导入），重铺覆盖层：`pip install --force-reinstall --no-deps <triton_ascend wheel>`。
 
-**Q: 大模型跑不下 / 减层？**
-`num_layers_override: N`（或 `--num-layers N`）→ 自动构前 N 层 reduced ckpt，持久缓存到 `<kit>/reduced_ckpts/`（或 `$PRECISION_KIT_REDUCED_DIR`），A/B 两次 dump 只构一次。
+**Q: 大模型跑不下 / 减层？两侧减层机制有何不同？**
+`num_layers_override: N`（或 `--num-layers N`）减到前 N 层。两侧机制不同：
+- **transformers**：只跑浮点（bf16，不能跑量化）；可传入**完整权重** + `num_layers_override`，loader 容忍多余层、进程内只跑前 N 层（无需物理减层 ckpt）。
+- **vllm-ascend**：**必须传入物理减层的 ckpt**（其 loader 对多余层 KeyError）；kit 自动构前 N 层 reduced ckpt，持久缓存到 `<kit>/reduced_ckpts/`（或 `$PRECISION_KIT_REDUCED_DIR`），A/B 两次 dump 只构一次。
+> 量化对比时：transformers 侧用 bf16 完整/减层权重做浮点参考，vllm-ascend 侧用量化减层 ckpt。
 
 ## 7. Release notes
 
