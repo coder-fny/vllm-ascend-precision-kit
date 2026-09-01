@@ -217,7 +217,3 @@ vllm-ascend-precision-kit/
 - 更多架构 HookSpec 自动 trace 覆盖（持续接入新模型）。
 - MTP（multi-token prediction）draft 路径的 hook（当前 MoE 对比不含 MTP 部分）。
 - decode 阶段的 op-level 深入（当前 op hook 主要 prefill）。
-
-## 设计来源
-
-基于 `megatron_vs_hf` 训练精度对比工具的策略模式（Runner/Backend、dump→compare 两段式、meta.json gather、三层配置防护、cosine 指标），按推理场景裁剪 + HookSpec 映射表 + vllm V1 apply_model hooking + 单算子复现 + trace 发现。详见 `docs/design.md`。
