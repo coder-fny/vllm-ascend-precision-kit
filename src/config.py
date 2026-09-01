@@ -32,6 +32,18 @@ from typing import Any, Dict, Optional
 # Parameters that affect inference precision. Read from models/<model>.yaml's
 # `precision` section. To add a new precision-critical param: add it here with
 # (default, description) — both backends will read and snapshot it.
+# Ascend deterministic-execution env switches. Killing run-to-run HCCL/ATB
+# nondeterminism makes same-code dumps bit-identical, so A/B compares isolate
+# real kernel differences instead of being swamped by reduce/matmul reordering.
+# Applied via CLI ``--deterministic`` or model yaml ``deterministic: true``.
+DETERMINISTIC_ENV: Dict[str, str] = {
+    "HCCL_DETERMINISTIC": "true",        # deterministic HCCL all-reduce order
+    "LCCL_DETERMINISTIC": "1",           # deterministic LCCL (low-latency collectives)
+    "ATB_LLM_LCOC_ENABLE": "0",         # disable ATB LCOC fusion (reorders ops)
+    "ATB_MATMUL_SHUFFLE_K_ENABLE": "0", # disable matmul K-dim shuffle (reorders)
+}
+
+
 PRECISION_CRITICAL_PARAMS: Dict[str, tuple] = {
     "dtype":                ("bfloat16", "Compute dtype (bfloat16/float16/float32)"),
     "attn_implementation":  ("eager",     "Attention impl (eager/sdpa/flash_attention) — eager for op-level comparability"),
@@ -298,6 +310,21 @@ class UnifiedConfig:
         env = self.model_yaml.get("env", {})
         for key, value in env.items():
             os.environ.setdefault(key, str(value))
+
+    @property
+    def deterministic(self) -> bool:
+        """Yaml top-level `deterministic: true` toggle (also via CLI --deterministic)."""
+        return bool(self.model_yaml.get("deterministic", False))
+
+    def apply_deterministic_env(self):
+        """Force-set Ascend deterministic env switches (propagates to vllm workers).
+
+        Use for A/B regression compares: makes same-code runs bit-identical so
+        the only difference between two dumps is the code under test.
+        """
+        for k, v in DETERMINISTIC_ENV.items():
+            os.environ[k] = v
+        print("[deterministic] HCCL/LCCL deterministic + ATB LCOC/matmul-shuffle disabled")
 
     # ------------------------------------------------------------------
     # Apply to argparse args

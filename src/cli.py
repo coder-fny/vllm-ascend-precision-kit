@@ -87,6 +87,11 @@ def build_parser():
                    help="Reduce model to first N layers (huge models that don't fit)")
     g.add_argument("--dump-mode", choices=["none", "simple", "full"], default="simple",
                    help="(reserved; boundary hooks always capture in simple/full)")
+    g.add_argument("--deterministic", action="store_true",
+                   help="Force Ascend deterministic env (HCCL_DETERMINISTIC=true, "
+                        "LCCL_DETERMINISTIC=1, ATB_LLM_LCOC_ENABLE=0, "
+                        "ATB_MATMUL_SHUFFLE_K_ENABLE=0) so same-code dumps are "
+                        "bit-identical; isolates real kernel diffs in A/B compares.")
 
     # compare
     g = parser.add_argument_group("Compare")
@@ -119,6 +124,8 @@ def main():
     cfg = UnifiedConfig(model_name, project_root=PROJECT_ROOT)
     cfg.apply_env_vars()
     cfg.apply_to_args(args)
+    if getattr(args, "deterministic", False) or cfg.deterministic:
+        cfg.apply_deterministic_env()
 
     if args.mode == "dump":
         _run_dump(args, cfg)
