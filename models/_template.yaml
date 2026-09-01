@@ -4,9 +4,11 @@
 # Copy to models/<your_model>.yaml and edit. Run:
 #   PYTHONPATH=<vllm>:<vllm-ascend> bash run.sh --model <your_model> --mode dump \
 #       --side vllm_ascend --vllm-version 0.26.0 --phase prefill
-# CLI flags override yaml: --tp --num-layers --prompt --max-new-tokens
-#   --output-dir --phase --side --vllm-version --deterministic --per-layer
-#   --ref-tokens --all-tensors --rtol --atol --tensor-rtol
+# CLI flags (override yaml; full list, see `python3 run_precision_compare.py --help`):
+#   --mode --model --output-dir --side --side-a --side-b --vllm-version
+#   --version-a --version-b --phase --prompt --max-new-tokens --ref-tokens
+#   --per-layer --tp --num-layers --dump-mode --deterministic --dir-a --dir-b
+#   --all-tensors --op --input-dump --input-stage --input-key --rtol --atol --tensor-rtol
 # [precision-critical] fields affect numerics, are saved in config_snapshot,
 # and a mismatch between the two dump sides raises a compare warning.
 # =============================================================================

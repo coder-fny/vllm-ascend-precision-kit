@@ -9,7 +9,7 @@
 
 > 机制 1 找"在哪"，机制 2 定"为什么"。算子内部用 op hook 的 in vs out 对比代替（MoE 融合 expert 非 nn.Module）。
 
-## 用法（4 个 mode，run.sh 自动加载 CANN env + custom op LD_LIBRARY_PATH）
+## 用法（4 个 mode；run.sh 自动 source set_env.sh + 把 CANN python site-packages 加进 PYTHONPATH（cann_ops_transformer/triton-ascend 可导入、vllm HAS_TRITON=True）+ custom op LD_LIBRARY_PATH）
 
 ```bash
 # 0. trace —— 发现 hook，生成统一 yaml（module + op，配 in+out，执行顺序排序）
@@ -23,7 +23,9 @@ bash run.sh --model <m> --mode dump --side transformers --phase prefill
 # 跨版本（两侧 vllm-ascend，同模型，不同版本/pod）
 bash run.sh --model minimax_m2_7_w8a8 --mode dump --side vllm_ascend --vllm-version 0.20.2 --phase prefill   # pod A
 bash run.sh --model minimax_m2_7_w8a8 --mode dump --side vllm_ascend --vllm-version 0.18.0 --phase prefill   # pod B
-# 常用覆盖：--num-layers 2 --tp 8 --output-dir dumped/runX --prompt "..."
+# 常用覆盖：--num-layers 2 --tp 8 --output-dir dumped/runX --prompt "..." --deterministic
+#   --deterministic：强制 HCCL_DETERMINISTIC=true/LCCL_DETERMINISTIC=1/ATB_LLM_LCOC_ENABLE=0/ATB_MATMUL_SHUFFLE_K_ENABLE=0，
+#   同码跑位一致（A/B 回归用，见下「确定性 A/B 回归」）
 
 # 2. compare —— 任意两侧对称对比（--all-tensors 含 sharded 算子点）
 python3 run_precision_compare.py --mode compare \
@@ -54,6 +56,26 @@ python3 run_precision_compare.py --mode single-op --op model.layers.5.self_attn.
 3. `compare` → 看首个 FAIL + normR 定位发散边界
 4. 必要时 `single-op` / `fixed_op_verify.py` / 分析脚本确认根因；op hook in vs out 隔离融合算子
 
+## 确定性 A/B 回归（PR 前后对比）
+
+对比同一 PR 前后（如关闭某融合算子）两路 MoE 的逐层激活，需把运行间 HCCL/ATB 不确定性压到 0，否则噪声会淹没算子差：
+
+```bash
+# 1) state A（PR 前）：切到目标代码（如 git checkout <pr>~1 -- <file>）
+PYTHONPATH=<vllm>:<vllm-ascend> bash run.sh --model <m> --mode dump --side vllm_ascend \n  --vllm-version 0.26.0 --phase prefill --deterministic --output-dir dumped/A
+# 2) state B（PR 后 / HEAD）：再 dump（同样 --deterministic）
+PYTHONPATH=<vllm>:<vllm-ascend> bash run.sh --model <m> --mode dump --side vllm_ascend \n  --vllm-version 0.26.0 --phase prefill --deterministic --output-dir dumped/B
+# 3) 对照 B2（同 state B 再跑一次）→ 同码应位一致，证明噪声已消除
+# 4) compare：python3 run_precision_compare.py --mode compare --dir-a dumped/A/... --dir-b dumped/B/... --all-tensors
+```
+
+实测（GLM-5.2 W4A8, TP8+EP8, PR #15077 关 MegaMoE→MC2）：B vs B2 位一致（maxAbs=0）；MegaMoE vs MC2 也位一致（maxAbs=0）→ 两路融合 MoE 算子精度等价、#15077 零精度变化。
+
+## 文档同步约定
+
+- **每个功能 commit 必须同步更新文档**：CLI 新增 `--flag` → 写进 README「用法」+ `models/_template.yaml`；yaml 新增字段 → 写进 `_template.yaml`；行为变更 → 更新 README 相关段落 + `CHANGELOG.md` 追加一条。
+- **提交前跑漂移检查**：`python3 scripts/check_doc_drift.py`（解析 `cli.py` 的 `add_argument(--xxx)` 与 `config.py` 的 yaml 字段，核对是否出现在 README / `_template.yaml`；有遗漏则 exit 1）。建议加进 CI / pre-push hook。
+
 ## 关键能力
 
 - **vllm-ascend V1 hooking**：vllm V1 模型在 worker 子进程 → `llm.apply_model` 在 worker 注册 hook，tensor 暂存 worker 侧 `vllm_v1` 模块级状态，generate 后取回（`VLLM_ALLOW_INSECURE_SERIALIZATION=1` + 顶层函数 + `functools.partial` 传 spec）。
@@ -67,7 +89,7 @@ python3 run_precision_compare.py --mode single-op --op model.layers.5.self_attn.
 - **Prefill + Decode 逐步**：vllm V1 用多次 `generate(prompt+ref[:i+1], max_tokens=1)` + prefix caching（extended-prefill），shape+计数器分 stage（大 prompt chunked prefill 也兼容）；HF 用 `use_cache` 循环。
 - **chat-template 输入**：yaml `chat.messages` → 两侧 `apply_chat_template`。
 - **量化 option A**：vllm-ascend `quantization=ascend`（读 `quant_model_description.json`）vs transformers bf16 参考，侧级配置。
-- **大模型减层**：`num_layers_override=N`（vllm 需减层 checkpoint，`scripts/make_reduced_ckpt.py` 构造，bf16 + W8A8 index 自动探测）。
+- **大模型减层（自动 + 持久缓存）**：`num_layers_override=N`（或 CLI `--num-layers N`）→ kit 自动构减层 ckpt 并持久缓存到 `<kit>/reduced_ckpts/reduced_{N}l_<src哈希>/`（或 `$PRECISION_KIT_REDUCED_DIR`，回退 `$TMPDIR`）；用 `.reduced_ok` 标记判断复用，A/B 两次 dump 只构一次，不再写小 `/tmp`、跑完不删。bf16 + W8A8/W4A8 index 自动探测。
 - **`--vllm-version` 自动设 `VLLM_VERSION` env**：CLI 显式参数优先级最高，覆盖 yaml 默认。
 
 ## 对比对象（任意两侧，对称）
@@ -120,7 +142,9 @@ overrides:
 
 在已预装 `torch`+`torch_npu`（HCCL）、`transformers`、`vllm`+`vllm-ascend` 的 Ascend NPU 容器内运行。验证 pod：mm-bench-a3（vllm 0.21.1）、vllm0202（vllm 0.20.2，8 卡）、vllm0180（vllm 0.18.0，8 卡）。`accelerate` 用于 transformers 多卡；减层模型自动单卡加载（`device_map={"":npu:0}`）。
 
-**`run.sh` 包装脚本**（自动加载 CANN 环境 + 追加 `libcust_opapi.so` 含 `aclnnAddRmsNormBias` 等 custom op 到 `LD_LIBRARY_PATH`；支持 `bash run.sh scripts/xxx.py` 跑任意脚本）。
+**`run.sh` 包装脚本**：`ASCEND_TOOLKIT_HOME` 未设时显式 `source /usr/local/Ascend/ascend-toolkit/set_env.sh`（不依赖 login shell）；把 CANN python site-packages 加进 `PYTHONPATH`（使 `cann_ops_transformer`/triton-ascend 可导入、vllm `HAS_TRITON=True`，纯 EP=8 prefill 的 slot-mapping triton kernel 需要）；追加 `libcust_opapi.so`（`aclnnAddRmsNormBias` 等 custom op）到 `LD_LIBRARY_PATH`；支持 `bash run.sh scripts/xxx.py`。
+
+**triton-ascend 前置（纯 EP=8 prefill）**：无 DCP 的 EP=8 prefill 走 triton slot-mapping kernel，需 triton-ascend 正确安装。若 GPU `triton` 覆盖了 triton-ascend 的 `libtriton.so`（`triton._C.libtriton.ascend` 不可导入、`HAS_TRITON=False`），重铺覆盖层：`pip install --force-reinstall --no-deps <triton_ascend wheel>`（ARM 上 triton_ascend 依赖 `triton==3.5.0` 并覆盖共享目录，重铺后 `import triton` 为 3.2.0、`HAS_TRITON=True`）。
 
 **sync 坑**：`itask sync <pod>` 从 **cwd** 同步项目。必须在 `/mnt/d/ai_coding/vllm_ascend_precision` 目录下执行（用 `--force` 全量同步避免 hash 缓存漏传）。
 
@@ -149,8 +173,10 @@ vllm_ascend_precision/
 │       ├── base.py              # InferenceBackend ABC
 │       ├── transformers_backend.py  # device_map + use_cache decode + chat + 减层单卡
 │       └── vllm_ascend_backend.py   # apply_model hooking + TP>1 gather + logits 重算 + EP + additional_config
-├── models/                      # 模型配置（qwen3_30b_a3b/.../minimax_m2_7_w8a8...）
+├── models/                      # 模型配置 + _template.yaml（公共模板，列出所有字段）
 │   └── hooks/                   # qwen2/qwen3/deepseek/glm/minimax_m2 HookSpec + <arch>_trace.yaml（trace 生成）
+├── reduced_ckpts/               # (gitignored) 自动减层 ckpt 缓存（持久、跨 run 复用）
+├── scripts/                     # make_reduced_ckpt / check_doc_drift / analyze_* / fixed_op_verify / ...
 └── docs/
 ```
 
@@ -161,7 +187,11 @@ vllm_ascend_precision/
 - ✅ op hook（算子内部 I/O，per_rank，call_index）+ modifiers（yaml patch）
 - ✅ single-op 隔离复现 + fixed_op_verify（已实测）
 - ✅ 验证：Qwen3-30B-A3B、DeepSeek-V2-Lite（MLA）、Qwen3-32B-w8a8（量化）、GLM-5.1（减层）、MiniMaxM2-7（跨版本，定位到 expert 算子切换根因）
-- 🚧 大模型减层（vllm）：transformers 可用；vllm 受 deepseek_v2 loader 不容忍多余层限制，需减层 checkpoint
+- ✅ `--deterministic` 确定性开关（HCCL/LCCL/ATB，同码位一致，A/B 回归隔离真实算子差）
+- ✅ run.sh 内化 CANN 环境（source set_env + CANN site-packages → HAS_TRITON）
+- ✅ 减层自动 + 持久缓存（reduced_ckpts/，A/B 共用，不受 /tmp 限制）
+- ✅ 公共配置模板 `models/_template.yaml`（所有字段注释）+ `scripts/check_doc_drift.py` 文档漂移检查 + `CHANGELOG.md`
+- 🚧 大模型减层（vllm）：vllm 受 deepseek_v2 loader 不容忍多余层限制（现用 auto-reduce+缓存 已自动构造减层 ckpt，无需手动脚本）
 - 🚧 option B/C 两侧量化（torchao，transformers NPU 量化路径）
 
 ## 设计来源
