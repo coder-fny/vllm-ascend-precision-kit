@@ -74,7 +74,7 @@ PYTHONPATH=<vllm>:<vllm-ascend> bash run.sh --model <m> --mode dump --side vllm_
 ## 文档同步约定
 
 - **每个功能 commit 必须同步更新文档**：CLI 新增 `--flag` → 写进 README「用法」+ `models/_template.yaml`；yaml 新增字段 → 写进 `_template.yaml`；行为变更 → 更新 README 相关段落 + `CHANGELOG.md` 追加一条。
-- **提交前跑漂移检查**：`python3 scripts/check_doc_drift.py`（解析 `cli.py` 的 `add_argument(--xxx)` 与 `config.py` 的 yaml 字段，核对是否出现在 README / `_template.yaml`；有遗漏则 exit 1）。建议加进 CI / pre-push hook。
+- **提交前跑漂移检查**：`python3 scripts/check_doc_drift.py`（解析 `cli.py` 的 `add_argument(--xxx)` 与 `config.py` 的 yaml 字段，核对是否出现在 README / `_template.yaml`；有遗漏则 exit 1）。仓库自带 `.githooks/pre-commit`，clone 后一次性启用：`git config core.hooksPath .githooks`（改 `cli.py`/`config.py`/README/`_template.yaml` 的提交自动跑漂移检查、失败阻止提交；WIP `git commit --no-verify` 跳过）。也建议加进 CI。
 
 ## 关键能力
 

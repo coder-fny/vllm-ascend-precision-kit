@@ -1,0 +1,13 @@
+#!/bin/bash
+# Pre-commit hook: prevent CLI/yaml doc drift.
+# One-time setup per clone:  git config core.hooksPath .githooks
+# Skippable for WIP:         git commit --no-verify
+KIT="$(git rev-parse --show-toplevel)"
+if git diff --cached --name-only -- "$KIT" | grep -qE "src/(cli|config)\.py|README\.md|models/_template\.yaml"; then
+    python3 "$KIT/scripts/check_doc_drift.py" || {
+        echo "[pre-commit] 文档漂移：cli flag/yaml 字段未出现在 README/_template.yaml。"
+        echo "  补全文档后再提交；跳过(仅WIP): git commit --no-verify"
+        exit 1
+    }
+fi
+exit 0
