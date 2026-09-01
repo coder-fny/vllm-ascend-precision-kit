@@ -24,9 +24,11 @@ model:
   architecture: glm
   # trust-remote-code: load custom modeling code from the checkpoint dir.
   trust_remote_code: true
-  # num_layers_override: N -> physically extract only the first N layers into a
-  # temp reduced checkpoint (huge models / fast smoke). CLI --num-layers too.
-  # Omit/null to use the full model.
+  # num_layers_override: N -> reduce to first N layers.
+  #   transformers: load full ckpt + run N in-process (tolerates extra layers;
+  #     bf16 only, no quant). vllm-ascend: MUST use a physically-reduced ckpt
+  #     (loader KeyErrors on extra layers); kit auto-builds + caches it.
+  #   CLI --num-layers too. Omit/null = full model.
   # num_layers_override: 20
 
 # ---- Hook spec (which module/op boundaries to dump) ----
