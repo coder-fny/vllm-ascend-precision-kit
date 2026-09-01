@@ -5,6 +5,9 @@
 # Toggle #15077 in vllm_ascend/ascend_forward_context.py between dumps:
 #   state A (before): revert the `return False` line  (MegaMoE ON)
 #   state B (after) : current HEAD fa3537f92           (MegaMoE OFF)
+# Deterministic by default: bit-identical controls so A-vs-B isolates the kernel
+# switch (HCCL_DETERMINISTIC etc.). Override with a non-deterministic run if needed.
+deterministic: true
 model:
   name: GLM-5.2-W4A8-MegaMoE-AB
   hf_model_path: /a3_inference/itask/workdir/shared/fny02324681/GLM5.2_30ms/v0.26.0/glm52_w4a8_20l
