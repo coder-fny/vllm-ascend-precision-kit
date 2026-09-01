@@ -121,8 +121,8 @@ env:
 # vllm:
 #   versions:
 #     "0.23.0":
-#       pythonpath: [/a3_inference/.../v0.23.0/repo/vllm-ascend]
+#       pythonpath: [/path/to/vllm-ascend-v0.23.0]
 #       env: {VLLM_VERSION: "0.23.0"}
 #     "0.26.0":
-#       pythonpath: [/a3_inference/.../v0.26.0/repo/vllm-ascend]
+#       pythonpath: [/path/to/vllm-ascend-v0.26.0]
 #       env: {VLLM_VERSION: "0.26.0"}

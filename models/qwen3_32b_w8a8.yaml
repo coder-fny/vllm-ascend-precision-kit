@@ -1,7 +1,6 @@
 # Qwen3-32B — option A: vllm-ascend W8A8 quantized (reduced 2-layer ckpt) vs
 # transformers bf16 reference (num_layers_override=2). Same base model.
 # Dense Qwen3 (64 layers) -> 2-layer reduced fits single card.
-# Pod: vllm0202 (vllm-ascend 0.20.2, VLLM_VERSION=0.20.2).
 # Selected via --model qwen3_32b_w8a8
 
 model:

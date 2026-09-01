@@ -1,4 +1,3 @@
-# Qwen3-30B-A3B (MoE, 48 layers, 128 experts) — verification model on mm-bench-a3
 # Real Qwen3 architecture; layernorm/attention boundaries match qwen3 HookSpec.
 # Dense-MLP projection hooks skip on MoE (mlp is MoE block) — expected.
 # Selected via --model qwen3_30b_a3b

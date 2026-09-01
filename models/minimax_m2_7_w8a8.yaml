@@ -1,5 +1,4 @@
 # MiniMaxM2-7 W8A8_DYNAMIC (QuaRot, Ascend modelslim) — cross-version prefill compare.
-# vllm0202 (vllm-ascend 0.20.2, VLLM_VERSION=0.20.2) vs vllm0180 (0.18.0).
 # Both sides run vllm-ascend with the SAME W8A8 model; compare prefill activations
 # to localize version-to-version regression.
 # 215GB / TP=8 ~= 27GB/card -> fits 910A3 (64GB).
