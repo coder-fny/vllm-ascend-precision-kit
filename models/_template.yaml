@@ -1,0 +1,126 @@
+# =============================================================================
+# vllm-ascend-precision-kit  —  public model-config template (ALL fields)
+# =============================================================================
+# Copy to models/<your_model>.yaml and edit. Run:
+#   PYTHONPATH=<vllm>:<vllm-ascend> bash run.sh --model <your_model> --mode dump \
+#       --side vllm_ascend --vllm-version 0.26.0 --phase prefill
+# CLI flags override yaml: --tp --num-layers --prompt --max-new-tokens
+#   --output-dir --phase --side --vllm-version --deterministic --per-layer
+#   --ref-tokens --all-tensors --rtol --atol --tensor-rtol
+# [precision-critical] fields affect numerics, are saved in config_snapshot,
+# and a mismatch between the two dump sides raises a compare warning.
+# =============================================================================
+
+# ---- Model identity / checkpoint ----
+model:
+  # [precision-critical, side-overrideable] HF checkpoint path. bf16, or W4A8/
+  # W8A8 (ascend quant) which must contain quant_model_description.json +
+  # quant_model_weights*.safetensors (+ .index.json).
+  hf_model_path: /path/to/your/model
+  # Architecture id -> default hook spec (models/hooks/<arch>.yaml) + loader.
+  # Known: qwen2, qwen3, deepseek, glm, minimax_m2.
+  architecture: glm
+  # trust-remote-code: load custom modeling code from the checkpoint dir.
+  trust_remote_code: true
+  # num_layers_override: N -> physically extract only the first N layers into a
+  # temp reduced checkpoint (huge models / fast smoke). CLI --num-layers too.
+  # Omit/null to use the full model.
+  # num_layers_override: 20
+
+# ---- Hook spec (which module/op boundaries to dump) ----
+# Default: models/hooks/<architecture>.yaml. Auto-generate for a new arch via:
+#   bash run.sh --mode trace --model <m> --side vllm_ascend --vllm-version X
+hook_spec: models/hooks/glm.yaml
+
+# ---- Precision (every field below is precision-critical) ----
+precision:
+  dtype: bfloat16              # bfloat16 / float16 / float32
+  attn_implementation: eager   # eager / sdpa / flash_attention (eager = op-level comparability)
+  enforce_eager: true           # disable cudagraph so forward hooks fire (fused kernels still run)
+  quantization_config: ascend   # null = no quant; 'ascend' for W4A8/W8A8
+  tp_size: 8                    # tensor-parallel size (sharding changes numerics)
+  dp_size: 1                    # data-parallel size (batch parallelism)
+  enable_expert_parallel: false # MoE EP (experts sharded across TP ranks). true => EP=TP
+  max_model_len: 32768          # max context len (prefill chunking respects this)
+  # vllm --additional-config (Ascend knobs). Common keys:
+  #   enable_fused_mc2: 1 | 0          (MC2 fused MoE comm; gate for use_cann_megamoe)
+  #   enable_flashcomm1: true | false
+  #   fuse_muls_add: true | false
+  #   multistream_overlap_shared_expert: true | false
+  #   enable_mc2_hierarchy_comm: true | false
+  #   enable_sparse_sfa_c8 / enable_sparse_li_c8: true | false
+  #   enable_cpu_binding: true | false
+  #   enable_shared_expert_dp: true | false
+  #   ascend_compilation_config: {enable_npugraph_ex: true, enable_static_kernel: false}
+  additional_config:
+    enable_fused_mc2: 1
+
+# ---- Input ----
+# Raw prompt (used unless chat.messages is set).
+prompt: "The quick brown fox jumps over the lazy dog. The capital of France is"
+# Tokens to generate (decode phase only; prefill ignores this).
+max_new_tokens: 8
+# Chat-template input -> both sides apply tokenizer chat_template
+# (add_generation_prompt=true) so activations match a /v1/chat/completions
+# request. Falls back to `prompt` when absent.
+# chat:
+#   messages:
+#     - {role: system, content: "You are a helpful assistant."}
+#     - {role: user, content: "What is the capital of France?"}
+
+# ---- Deterministic execution (A/B regression) ----
+# true -> force HCCL_DETERMINISTIC=true, LCCL_DETERMINISTIC=1,
+# ATB_LLM_LCOC_ENABLE=0, ATB_MATMUL_SHUFFLE_K_ENABLE=0 (propagates to workers)
+# so same-code runs are bit-identical and A-vs-B isolates the real kernel diff.
+# Also settable via CLI --deterministic. See config.DETERMINISTIC_ENV.
+deterministic: false
+
+# ---- Compare thresholds (PASS = cosine>=X AND norm_rel_diff in [1-X,1+X]) ----
+compare:
+  thresholds:
+    cosine: 0.95            # min cosine similarity
+    abs_mean_rel_diff: 0.05 # max |meanA-meanB|/meanAbs
+    norm_rel_diff: 0.05     # normR must be within [0.8, 1.2]
+
+# ---- Output ----
+# Base dump dir; kit writes <output_dir>/<model_name>/<side>_<version>_ascend/.
+# CLI --output-dir overrides (default /tmp/vllm_precision).
+output_dir: ./dumped
+
+# ---- Environment (os.environ.setdefault before vllm init) ----
+# NOTE: PYTHONPATH must be set in the SHELL before run.sh (it picks the vllm /
+# vllm-ascend to import); setting it here is too late for the main process.
+# Use this for NPU/seed/offline flags.
+env:
+  ASCEND_DEVICE_ID: "0,1,2,3,4,5,6,7"
+  VLLM_ALLOW_INSECURE_SERIALIZATION: "1"
+  # VLLM_VERSION: "0.26.0"     # default version tag (CLI --vllm-version overrides)
+  # VLLM_USE_V1: "1"
+  # HF_HUB_OFFLINE: "1"
+  # TRANSFORMERS_OFFLINE: "1"
+
+# ---- Side-specific overrides ----
+# Per-side values that differ between the two dump sides (e.g. transformers
+# loads bf16 reference, vllm-ascend loads the quantized ckpt of the same base).
+# Any field above (hf_model_path, quantization_config, tp_size, ...) can be
+# overridden under sides.<side>.
+# sides:
+#   transformers:
+#     hf_model_path: /path/to/bf16/reference
+#     quantization_config: null
+#   vllm_ascend:
+#     hf_model_path: /path/to/w4a8/quantized
+#     quantization_config: ascend
+
+# ---- vllm-ascend version configs (cross-version regression) ----
+# version tag -> {pythonpath:[...], env:{...}}, selected by --vllm-version.
+# `pythonpath` inserted into sys.path; `env` applied (setdefault) before
+# importing vllm-ascend — useful when versions live in different pods/paths.
+# vllm:
+#   versions:
+#     "0.23.0":
+#       pythonpath: [/a3_inference/.../v0.23.0/repo/vllm-ascend]
+#       env: {VLLM_VERSION: "0.23.0"}
+#     "0.26.0":
+#       pythonpath: [/a3_inference/.../v0.26.0/repo/vllm-ascend]
+#       env: {VLLM_VERSION: "0.26.0"}
