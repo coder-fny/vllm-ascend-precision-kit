@@ -164,7 +164,7 @@ class UnifiedConfig:
             return arch
         # guess from model name: qwen2.5_0.5b -> qwen2
         name = self.model_name.lower()
-        for fam in ("qwen2", "qwen3", "llama", "chatglm", "baichuan"):
+        for fam in ("qwen2", "qwen3_5", "qwen3", "llama", "chatglm", "baichuan"):
             if name.startswith(fam):
                 return fam
         return name

@@ -12,7 +12,7 @@ import sys
 
 from .config import UnifiedConfig, check_config_consistency
 from .comparator import (
-    PrecisionComparator, load_scalars, _GREEN, _RED, _BOLD, _RESET,
+    PrecisionComparator, load_scalars, _GREEN, _RED, _YELLOW, _BOLD, _RESET,
 )
 from .parallel_merge import parse_parallel_tag
 
@@ -111,7 +111,10 @@ def build_parser():
     g = parser.add_argument_group("Thresholds")
     g.add_argument("--rtol", type=float, default=1e-2)
     g.add_argument("--atol", type=float, default=1e-5)
-    g.add_argument("--tensor-rtol", type=float, default=5e-2)
+    g.add_argument("--tensor-rtol", type=float, default=None,
+                   help="tensor PASS tolerance (cosine >= 1-rtol and norm_ratio within rtol). "
+                        "Takes precedence over compare.thresholds.abs_mean_rel_diff in the "
+                        "model yaml; default 5e-2 when neither is set.")
 
     return parser
 
@@ -174,7 +177,18 @@ def _run_compare(args, cfg):
     check_config_consistency(args.dir_a, args.dir_b, label_a, label_b)
 
     thr = cfg.compare_thresholds
-    tensor_rtol = float(thr.get("abs_mean_rel_diff", args.tensor_rtol))
+    # Precedence: explicit --tensor-rtol > model yaml compare.thresholds > 5e-2.
+    # (Previously the yaml silently won, so --tensor-rtol looked ignored.)
+    yaml_rtol = thr.get("abs_mean_rel_diff")
+    if args.tensor_rtol is not None:
+        tensor_rtol = float(args.tensor_rtol)
+        if yaml_rtol is not None and abs(float(yaml_rtol) - tensor_rtol) > 1e-12:
+            print(f"{_YELLOW}[WARN] --tensor-rtol={tensor_rtol:g} overrides model yaml "
+                  f"compare.thresholds.abs_mean_rel_diff={yaml_rtol}{_RESET}")
+    elif yaml_rtol is not None:
+        tensor_rtol = float(yaml_rtol)
+    else:
+        tensor_rtol = 5e-2
     comparator = PrecisionComparator(rtol=args.rtol, atol=args.atol, tensor_rtol=tensor_rtol)
 
     all_passed = True
@@ -244,7 +258,7 @@ def _yaml_module_sortkey(name):
     return (0, 100)
 
 
-def _print_trace_report(calls, arch, modules):
+def _print_trace_report(calls, arch, modules, side="vllm_ascend"):
     """Print discovered op call paths + write a UNIFIED auto-generated yaml.
 
     ``calls``: {op_name: [(caller_loc, [shapes...]), ...]} (fused C++ ops).
@@ -352,7 +366,7 @@ def _print_trace_report(calls, arch, modules):
         "hook_points: []",
         "",
         "overrides:",
-        "  vllm_ascend:",
+        f"  {side}:",
         '    "":',
         "      hook_points:",
     ]
@@ -368,7 +382,9 @@ def _print_trace_report(calls, arch, modules):
             lines.append(f'        - {{id: "{uid}_in",  op: "{name}", capture: input,  call_index: "0-3"}}')
             lines.append(f'        - {{id: "{uid}_out", op: "{name}", capture: output, call_index: "0-3"}}')
     yaml_text = "\n".join(lines) + "\n"
-    out_path = os.path.join("models", "hooks", f"{arch}_trace.yaml")
+    # One file per side: tracing vllm_ascend and transformers used to overwrite
+    # the same <arch>_trace.yaml, losing the other side's discovery.
+    out_path = os.path.join("models", "hooks", f"{arch}_trace_{side}.yaml")
     print("")
     try:
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -407,7 +423,7 @@ def _run_trace(args, cfg):
         calls = trace_list[0] if isinstance(trace_list, list) else trace_list
         mod_list = backend._llm.apply_model(vllm_v1.w_scan_modules)
         modules = mod_list[0] if isinstance(mod_list, list) else mod_list
-        _print_trace_report(calls, cfg.architecture, modules)
+        _print_trace_report(calls, cfg.architecture, modules, args.side)
     else:
         from .tracer import OpTracer
         tracer = OpTracer()
@@ -418,7 +434,7 @@ def _run_trace(args, cfg):
             tracer.uninstall()
         from .vllm_v1 import filter_interesting_modules
         modules = filter_interesting_modules(model.named_modules())
-        _print_trace_report(dict(tracer._calls), cfg.architecture, modules)
+        _print_trace_report(dict(tracer._calls), cfg.architecture, modules, args.side)
     print('[trace] done')
 
 def _run_single_op(args, cfg):

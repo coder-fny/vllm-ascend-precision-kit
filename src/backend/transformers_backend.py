@@ -121,7 +121,13 @@ class TransformersBackend(InferenceBackend):
     def get_num_layers(self) -> int:
         if self._config is None:
             return 0
-        return int(getattr(self._config, "num_hidden_layers", 0))
+        n = getattr(self._config, "num_hidden_layers", 0)
+        if not n:
+            # Multimodal wrappers (e.g. Qwen3_5ForConditionalGeneration) keep the
+            # text stack under `text_config`; the top-level attr is None.
+            text_cfg = getattr(self._config, "text_config", None)
+            n = getattr(text_cfg, "num_hidden_layers", 0) if text_cfg is not None else 0
+        return int(n or 0)
 
     def run_prefill(self, input_ids: torch.Tensor) -> torch.Tensor:
         input_ids = input_ids.to(self._device)

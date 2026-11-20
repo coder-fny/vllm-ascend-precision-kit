@@ -296,8 +296,12 @@ class PrecisionComparator:
     def report_gathered_comparison(self, comparisons, title="Gathered Tensor Stats",
                                    label_a="name_a", label_b="name_b"):
         if not comparisons:
-            print(f"\n{_YELLOW}No gathered tensors found for comparison.{_RESET}")
-            return True
+            print(f"\n{_RED}No gathered tensors found for comparison -- treating as FAILED.{_RESET}")
+            print(f"{_YELLOW}Hint: make sure the hook spec module paths exist on BOTH sides "
+                  f"(a multimodal wrapper adds a `language_model.` prefix on the vllm side), "
+                  f"and pass --num-layers when the layer count lives under `text_config`."
+                  f"{_RESET}")
+            return False
         cos_thr = 1.0 - self.tensor_rtol
         lines = ["", f"{_BOLD}  PRECISION COMPARISON REPORT - {title}{_RESET}"]
         lines.append(f"  Pass = cosine_sim >= {cos_thr:.4f}; element-wise errors shown for severity "

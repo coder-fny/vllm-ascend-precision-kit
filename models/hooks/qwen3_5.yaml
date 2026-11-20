@@ -1,0 +1,51 @@
+# HookSpec for Qwen3.5 (model_type: qwen3_5, e.g. Qwen3_5ForConditionalGeneration).
+#
+# Qwen3.5 checkpoints wrap the text stack in a multimodal conditional-generation
+# model, so module paths differ per side:
+#   transformers : model.layers.{L}.*
+#   vllm-ascend  : language_model.model.layers.{L}.*
+# Base hook_points below are the transformers paths; the vllm_ascend override
+# rewrites them with the extra `language_model.` prefix.
+#
+# NOTE: these checkpoints usually have num_hidden_layers=None at top level and the
+# real value under `text_config.num_hidden_layers`; backends fall back to it.
+
+architecture: qwen3_5
+num_layers_from: config.num_hidden_layers
+
+hook_points:
+  - {id: "layers.{L}.ln1_in",   module: "model.layers.{L}.input_layernorm", capture: input,  replicated: true}
+  - {id: "layers.{L}.attn_out", module: "model.layers.{L}.self_attn",       capture: output, replicated: true}
+  - {id: "layers.{L}.mlp_out",  module: "model.layers.{L}.mlp",             capture: output, replicated: true}
+  - {id: "final_norm",          module: "model.norm",                       capture: output, replicated: true}
+  - {id: "logits",              module: "lm_head",                          capture: output, replicated: true}
+
+  # --- operator boundaries (for single-op replay) ---
+  - {id: "layers.{L}.q_proj.out",   module: "model.layers.{L}.self_attn.q_proj", capture: output, replicated: false}
+  - {id: "layers.{L}.k_proj.out",   module: "model.layers.{L}.self_attn.k_proj", capture: output, replicated: false}
+  - {id: "layers.{L}.v_proj.out",   module: "model.layers.{L}.self_attn.v_proj", capture: output, replicated: false}
+  - {id: "layers.{L}.o_proj.in",    module: "model.layers.{L}.self_attn.o_proj", capture: input,  replicated: false}
+  - {id: "layers.{L}.o_proj.out",   module: "model.layers.{L}.self_attn.o_proj", capture: output, replicated: true}
+  - {id: "layers.{L}.gate_proj.out", module: "model.layers.{L}.mlp.gate_proj",   capture: output, replicated: false}
+  - {id: "layers.{L}.up_proj.out",  module: "model.layers.{L}.mlp.up_proj",      capture: output, replicated: false}
+  - {id: "layers.{L}.down_proj.in", module: "model.layers.{L}.mlp.down_proj",    capture: input,  replicated: false}
+  - {id: "layers.{L}.down_proj.out", module: "model.layers.{L}.mlp.down_proj",   capture: output, replicated: true}
+
+overrides:
+  vllm_ascend:
+    "":
+      hook_points:
+        - {id: "layers.{L}.ln1_in",   module: "language_model.model.layers.{L}.input_layernorm", capture: input,  replicated: true}
+        - {id: "layers.{L}.attn_out", module: "language_model.model.layers.{L}.self_attn",       capture: output, replicated: true}
+        - {id: "layers.{L}.mlp_out",  module: "language_model.model.layers.{L}.mlp",             capture: output, replicated: true}
+        - {id: "final_norm",          module: "language_model.model.norm",                       capture: output, replicated: true}
+        - {id: "logits",              module: "lm_head",                                         capture: output, replicated: true}
+        - {id: "layers.{L}.q_proj.out",   module: "language_model.model.layers.{L}.self_attn.q_proj", capture: output, replicated: false}
+        - {id: "layers.{L}.k_proj.out",   module: "language_model.model.layers.{L}.self_attn.k_proj", capture: output, replicated: false}
+        - {id: "layers.{L}.v_proj.out",   module: "language_model.model.layers.{L}.self_attn.v_proj", capture: output, replicated: false}
+        - {id: "layers.{L}.o_proj.in",    module: "language_model.model.layers.{L}.self_attn.o_proj", capture: input,  replicated: false}
+        - {id: "layers.{L}.o_proj.out",   module: "language_model.model.layers.{L}.self_attn.o_proj", capture: output, replicated: true}
+        - {id: "layers.{L}.gate_proj.out", module: "language_model.model.layers.{L}.mlp.gate_proj",   capture: output, replicated: false}
+        - {id: "layers.{L}.up_proj.out",  module: "language_model.model.layers.{L}.mlp.up_proj",      capture: output, replicated: false}
+        - {id: "layers.{L}.down_proj.in", module: "language_model.model.layers.{L}.mlp.down_proj",    capture: input,  replicated: false}
+        - {id: "layers.{L}.down_proj.out", module: "language_model.model.layers.{L}.mlp.down_proj",   capture: output, replicated: true}
